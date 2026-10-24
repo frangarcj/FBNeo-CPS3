@@ -34,6 +34,11 @@ static uint32_t wav_frames = 0;
 static const char *opt_key[MAX_OPTS], *opt_val[MAX_OPTS];
 static int opt_count = 0;
 
+// joypad presses set with -i frame:port:id:frames (RETRO_DEVICE_ID_JOYPAD_*)
+#define MAX_PRESSES 256
+static int press_frame[MAX_PRESSES], press_port[MAX_PRESSES], press_id[MAX_PRESSES], press_len[MAX_PRESSES];
+static int press_count = 0;
+
 static uint32_t crc_table[256];
 static void crc_init(void)
 {
@@ -163,7 +168,11 @@ static void wav_header(FILE *f, uint32_t rate, uint32_t frames)
 static void input_poll_cb(void) {}
 static int16_t input_state_cb(unsigned port, unsigned dev, unsigned idx, unsigned id)
 {
-	(void)port; (void)dev; (void)idx; (void)id;
+	if (dev != RETRO_DEVICE_JOYPAD || idx != 0) return 0;
+	for (int i = 0; i < press_count; i++)
+		if (press_port[i] == (int)port && press_id[i] == (int)id &&
+		    cur_frame >= press_frame[i] && cur_frame < press_frame[i] + press_len[i])
+			return 1;
 	return 0;
 }
 
@@ -172,7 +181,7 @@ static int16_t input_state_cb(unsigned port, unsigned dev, unsigned idx, unsigne
 int main(int argc, char **argv)
 {
 	if (argc < 3) {
-		fprintf(stderr, "usage: %s core rom [-n frames] [-s sysdir] [-d dumpdir] [-e every] [-q] [-l] [-o key=value]\n", argv[0]);
+		fprintf(stderr, "usage: %s core rom [-n frames] [-s sysdir] [-d dumpdir] [-e every] [-q] [-l] [-o key=value] [-i frame:port:id:frames]\n", argv[0]);
 		return 1;
 	}
 	const char *core = argv[1], *rom = argv[2];
@@ -185,6 +194,11 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-q")) quiet = 1;
 		else if (!strcmp(argv[i], "-l")) list_options = 1;
 		else if (!strcmp(argv[i], "-w") && i + 1 < argc) wav = fopen(argv[++i], "wb");
+		else if (!strcmp(argv[i], "-i") && i + 1 < argc && press_count < MAX_PRESSES) {
+			int n = press_count;
+			if (sscanf(argv[++i], "%d:%d:%d:%d", &press_frame[n], &press_port[n], &press_id[n], &press_len[n]) == 4)
+				press_count++;
+		}
 		else if (!strcmp(argv[i], "-o") && i + 1 < argc && opt_count < MAX_OPTS) {
 			char *kv = strdup(argv[++i]), *eq = strchr(kv, '=');
 			if (eq) { *eq = 0; opt_key[opt_count] = kv; opt_val[opt_count++] = eq + 1; }

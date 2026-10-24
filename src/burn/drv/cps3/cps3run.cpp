@@ -1127,6 +1127,20 @@ static void Cps3PatchRegion()
 	}
 }
 
+// Screen mode dip: the setting of the game's test menu (sfiii2: Configuration
+// -> Game -> Screen Mode) is bit 8 of EEPROM words 0x11 and 0x29. Also set
+// after the EEPROM is loaded from the saved NVRAM, which comes after the reset.
+static void cps3_apply_screen_mode()
+{
+	if (cps3_dip & 0x80) {
+		EEPROM[0x11] = 0x100 + (EEPROM[0x11] & 0xff);
+		EEPROM[0x29] = 0x100 + (EEPROM[0x29] & 0xff);
+	} else {
+		EEPROM[0x11] = 0x000 + (EEPROM[0x11] & 0xff);
+		EEPROM[0x29] = 0x000 + (EEPROM[0x29] & 0xff);
+	}
+}
+
 static INT32 Cps3Reset()
 {
 	memset(RamStart, 0, RamEnd - RamStart);
@@ -1152,13 +1166,7 @@ static INT32 Cps3Reset()
 		}
 	}
 
-	if (cps3_dip & 0x80) {
-		EEPROM[0x11] = 0x100 + (EEPROM[0x11] & 0xff);
-		EEPROM[0x29] = 0x100 + (EEPROM[0x29] & 0xff);
-	} else {
-		EEPROM[0x11] = 0x000 + (EEPROM[0x11] & 0xff);
-		EEPROM[0x29] = 0x000 + (EEPROM[0x29] & 0xff);
-	}
+	cps3_apply_screen_mode();
 
 	ss_vscroll = 0;
 	ss_pal_base = 0;
@@ -1685,7 +1693,7 @@ INT32 DrvCps3Draw()
 
 	if (cps3_gfx_width != width) {
 		BurnDrvSetVisibleSize(width, 224);
-		if (width == 496) BurnDrvSetAspect(16, 9);
+		if (width > 384) BurnDrvSetAspect(16, 9); // 495 in the games' wide mode
 		else BurnDrvSetAspect(4, 3);
 		ReinitialiseVideo();
 		return 1;
@@ -2099,6 +2107,9 @@ INT32 cps3Scan(INT32 nAction, INT32 *pnMin)
 		ba.nAddress = 0;
 		ba.szName	= "EEPROM RAM";
 		BurnAcb(&ba);
+
+		if (nAction & ACB_WRITE)
+			cps3_apply_screen_mode();
 	}
 	
 	if (nAction & ACB_MEMORY_RAM) {
