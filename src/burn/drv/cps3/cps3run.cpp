@@ -1035,15 +1035,27 @@ void __fastcall cps3VidWriteLong(UINT32 addr, UINT32 data)
 // irq: the dispatcher runs with irqs masked, boot would only get on once per
 // frame.) Checked right before the dispatcher's mov.x @Rm,Rn that reads it,
 // or before the branch whose delay slot it is.
+//
+// That read starts each lap of the dispatcher over its tasks. Only skip when
+// two laps in a row took exactly the same time: then no task ran and no irq
+// came, so nothing can change until the next irq. Skipping a lap where a task
+// ran would delay the tasks it wakes, and the games' random numbers with them
+// (sfiii3 seeds its RNG from the frame counter in a task).
 static INT32 cps3_slice_end = 0;
 static INT32 cps3_speedup_reg = 0;
+static INT32 cps3_lap_start = 0, cps3_lap_cycles = -1;
 
 static void cps3_speedup_check()
 {
 	if ((Sh2GetRegister(cps3_speedup_reg) & 0xc7ffffff) == cps3_speedup_ram_address) {
-		INT32 left = cps3_slice_end - Sh2TotalCycles();
-		if (left > 0)
-			Sh2BurnCycles(left);
+		INT32 lap = Sh2TotalCycles() - cps3_lap_start;
+		if (lap == cps3_lap_cycles) {
+			INT32 left = cps3_slice_end - Sh2TotalCycles();
+			if (left > 0)
+				Sh2BurnCycles(left);
+		}
+		cps3_lap_cycles = lap;
+		cps3_lap_start = Sh2TotalCycles();
 	}
 }
 
@@ -1149,6 +1161,8 @@ static INT32 Cps3Reset()
 
 	ss_vscroll = 0;
 	ss_pal_base = 0;
+
+	cps3_lap_cycles = -1;
 
 	cram_bank = 0;
 	cps3_current_eeprom_read = 0;
@@ -2060,6 +2074,7 @@ INT32 cps3Frame()
 	// pending events carry over to the next frame
 	if (dma_irq_cycle != -1) dma_irq_cycle = (dma_irq_cycle > nCyclesTotal) ? dma_irq_cycle - nCyclesTotal : 0;
 	if (spritelist_dma_cycle != -1) spritelist_dma_cycle = (spritelist_dma_cycle > nCyclesTotal) ? spritelist_dma_cycle - nCyclesTotal : 0;
+	cps3_lap_start -= nCyclesTotal;
 
 	cps3SndUpdate();
 	CPS3_PROFILE_END(1);
@@ -2199,6 +2214,8 @@ INT32 cps3Scan(INT32 nAction, INT32 *pnMin)
 			bankswitch_cram();
 
 			cps3_map_game_flash();
+
+			cps3_lap_cycles = -1;
 		}
 	}
 	
