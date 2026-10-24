@@ -1,0 +1,104 @@
+# PS Vita build of the CPS3 core: the core, linked into the latest RetroArch
+# release as on the Vita every core is, packaged with its core info.
+#
+# Every push builds it (download it from the run's artifacts). Run it by hand
+# (Actions, Run workflow) to also publish a release, tagged
+# <RetroArch version>-cps3.<n>.
+
+name: PS Vita
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      retroarch:
+        description: RetroArch tag to build with (default the latest release)
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: git.libretro.com:5050/libretro-infrastructure/libretro-build-vita:latest
+      options: --user root
+    outputs:
+      retroarch: ${{ steps.retroarch.outputs.tag }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: RetroArch version
+      id: retroarch
+      run: |
+        tag="${{ github.event.inputs.retroarch }}"
+        if [ -z "$tag" ]; then
+          tag=$(git ls-remote --tags --refs https://github.com/libretro/RetroArch.git 'v*' \
+            | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+        fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+    - name: Build the core
+      run: make -C src/burner/libretro SUBSET=cps3 platform=vita -j$(getconf _NPROCESSORS_ONLN)
+
+    - name: Build RetroArch with it
+      run: |
+        git clone --depth 1 --branch "${{ steps.retroarch.outputs.tag }}" https://github.com/libretro/RetroArch.git retroarch
+        cp src/burner/libretro/fbneo_cps3_libretro_vita.a retroarch/libretro_vita.a
+        make -C retroarch -f Makefile.vita -j$(getconf _NPROCESSORS_ONLN) retroarch_vita.self
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: retroarch-vita
+        path: |
+          retroarch/retroarch_vita.self
+          retroarch/COPYING
+
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: retroarch-vita
+        path: retroarch
+
+    - name: Package
+      env:
+        RA_VERSION: ${{ needs.build.outputs.retroarch }}
+        SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+      run: dist/vita/package.sh retroarch fbneo_cps3_vita.zip
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: fbneo_cps3_vita
+        path: fbneo_cps3_vita.zip
+
+    - name: Release
+      if: github.event_name == 'workflow_dispatch'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        RA_VERSION: ${{ needs.build.outputs.retroarch }}
+      run: |
+        prefix="$RA_VERSION-cps3."
+        n=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' \
+          | sed -n "s/^$prefix\([0-9]*\)$/\1/p" | sort -n | tail -1)
+        tag="$prefix$(( ${n:-0} + 1 ))"
+        shots="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/dist/vita/screenshots"
+        cat > notes.md <<EOF
+        FinalBurn Neo CPS3 for the PS Vita, built with RetroArch $RA_VERSION.
+
+        Copy the \`app\` folder of the zip to the root of \`ux0:\` (see README.txt in the zip).
+
+        ![sfiii3 wide]($shots/sfiii3-wide-1.png) ![sfiii3 wide]($shots/sfiii3-wide-3.png)
+        ![jojoba]($shots/jojoba.png)
+        EOF
+        gh release create "$tag" fbneo_cps3_vita.zip --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
