@@ -2,7 +2,7 @@
 # release as on the Vita every core is, packaged with its core info.
 #
 # Every push builds it (download it from the run's artifacts). Run it by hand
-# (Actions, Run workflow) to also publish a release, tagged
+# (Actions, Run workflow) with "Publish a release" to also publish it, tagged
 # <RetroArch version>-cps3.<n>.
 
 name: PS Vita
@@ -15,6 +15,10 @@ on:
       retroarch:
         description: RetroArch tag to build with (default the latest release)
         required: false
+      release:
+        description: Publish a release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -83,7 +87,7 @@ jobs:
         path: fbneo_cps3_vita.zip
 
     - name: Release
-      if: github.event_name == 'workflow_dispatch'
+      if: github.event_name == 'workflow_dispatch' && inputs.release
       env:
         GH_TOKEN: ${{ github.token }}
         RA_VERSION: ${{ needs.build.outputs.retroarch }}
