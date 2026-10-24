@@ -1141,9 +1141,72 @@ static void cps3_apply_screen_mode()
 	}
 }
 
+// Patches to the game program, as blocks of original and patched bytes at SH-2
+// addresses (decrypted, big endian). Applied to the decrypted program and to
+// the encrypted copy, only if all the original bytes are there (the right
+// revision); also reverted.
+struct cps3_patch_block { UINT32 addr; UINT16 len; };
+
+#include "cps3_wide.h"
+
+static UINT8 cps3_program_byte(UINT32 a)
+{
+#ifdef LSB_FIRST
+	return RomGame_D[(a & 0x00ffffff) ^ 3];
+#else
+	return RomGame_D[a & 0x00ffffff];
+#endif
+}
+
+static INT32 cps3_patch_program(const cps3_patch_block *blocks, const UINT8 *bytes, INT32 apply)
+{
+	const UINT8 *p = bytes;
+	for (const cps3_patch_block *b = blocks; b->len; p += b->len * 2, b++) {
+		const UINT8 *from = apply ? p : p + b->len;
+		for (INT32 i = 0; i < b->len; i++)
+			if (cps3_program_byte(b->addr + i) != from[i]) return 0;
+	}
+
+	p = bytes;
+	for (const cps3_patch_block *b = blocks; b->len; p += b->len * 2, b++) {
+		const UINT8 *to = apply ? p + b->len : p;
+		for (INT32 i = 0; i < b->len; i++) {
+			UINT32 a = (b->addr + i) & 0x00ffffff;
+#ifdef LSB_FIRST
+			RomGame_D[a ^ 3] = to[i];
+#else
+			RomGame_D[a] = to[i];
+#endif
+			UINT32 w = a & ~3;
+			((UINT32 *)RomGame)[w / 4] = ((UINT32 *)RomGame_D)[w / 4] ^ cps3_mask(0x06000000 + w, cps3_key1, cps3_key2);
+		}
+	}
+	return 1;
+}
+
+// sfiii3's wide screen mode is unfinished: the screens out of the fights keep
+// their 4:3 layout. With the Screen mode dip at Wide, patch them as the
+// sfiii3ws hack does.
+static INT32 cps3_wide_patched = 0;
+
+static void cps3_update_wide_patch()
+{
+	if (cps3_key1 != 0xa55432b4 || cps3_isSpecial) return; // sfiii3 only
+
+	INT32 want = (cps3_dip & 0x80) ? 1 : 0;
+	if (want == cps3_wide_patched) return;
+
+	if (cps3_patch_program(sfiii3_wide_990512_blocks, sfiii3_wide_990512_bytes, want))
+		cps3_wide_patched = want;
+	else if (want)
+		bprintf(PRINT_ERROR, _T("CPS3: no wide screen patch for this sfiii3 revision\n"));
+}
+
 static INT32 Cps3Reset()
 {
 	memset(RamStart, 0, RamEnd - RamStart);
+
+	cps3_update_wide_patch();
 
 	// re-map cram_bank
 	cram_bank = 0;
@@ -1388,6 +1451,7 @@ INT32 cps3Init()
 INT32 cps3Exit()
 {
 	bprintf(0, _T("CPS-3 Driver exit....\n"));
+	cps3_wide_patched = 0;
 	Sh2Exit();
 	
 	BurnFree(Mem);

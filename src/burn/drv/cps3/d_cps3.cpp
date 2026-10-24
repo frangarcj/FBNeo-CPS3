@@ -1712,7 +1712,7 @@ struct BurnDriver BurnDrvSfiii3 = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Europe 990608)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3RomInfo, sfiii3RomName, NULL, NULL, NULL, NULL, cps3InputInfo, euroDIPInfo,
+	NULL, sfiii3RomInfo, sfiii3RomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwideeuroDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1722,7 +1722,7 @@ struct BurnDriver BurnDrvSfiii3u = {
 	"Street Fighter III 3rd Strike: Fight for the Future (USA 990608)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3uRomInfo, sfiii3uRomName, NULL, NULL, NULL, NULL, cps3InputInfo, usaDIPInfo,
+	NULL, sfiii3uRomInfo, sfiii3uRomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwideusaDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1732,7 +1732,7 @@ struct BurnDriver BurnDrvSfiii3j = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Japan 990608)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3jRomInfo, sfiii3jRomName, NULL, NULL, NULL, NULL, cps3InputInfo, japanDIPInfo,
+	NULL, sfiii3jRomInfo, sfiii3jRomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwidejapanDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1742,7 +1742,7 @@ struct BurnDriver BurnDrvSfiii3n = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Japan 990608, NO CD)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3 | HARDWARE_CAPCOM_CPS3_NO_CD, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3nRomInfo, sfiii3nRomName, NULL, NULL, NULL, NULL, cps3InputInfo, japanDIPInfo,
+	NULL, sfiii3nRomInfo, sfiii3nRomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwidejapanDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1752,7 +1752,7 @@ struct BurnDriver BurnDrvSfiii3na = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Asia 990608, NO CD)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3 | HARDWARE_CAPCOM_CPS3_NO_CD, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3naRomInfo, sfiii3naRomName, NULL, NULL, NULL, NULL, cps3InputInfo, asiaDIPInfo,
+	NULL, sfiii3naRomInfo, sfiii3naRomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwideasiaDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1762,7 +1762,7 @@ struct BurnDriver BurnDrvSfiii3r1 = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Europe 990512)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3r1RomInfo, sfiii3r1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, euroDIPInfo,
+	NULL, sfiii3r1RomInfo, sfiii3r1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwideeuroDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1772,7 +1772,7 @@ struct BurnDriver BurnDrvSfiii3ur1 = {
 	"Street Fighter III 3rd Strike: Fight for the Future (USA 990512)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3ur1RomInfo, sfiii3ur1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, usaDIPInfo,
+	NULL, sfiii3ur1RomInfo, sfiii3ur1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwideusaDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1782,7 +1782,7 @@ struct BurnDriver BurnDrvSfiii3jr1 = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Japan 990512)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3jr1RomInfo, sfiii3jr1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, japanDIPInfo,
+	NULL, sfiii3jr1RomInfo, sfiii3jr1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwidejapanDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1792,7 +1792,7 @@ struct BurnDriver BurnDrvSfiii3nr1 = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Japan 990512, NO CD)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3 | HARDWARE_CAPCOM_CPS3_NO_CD, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3nr1RomInfo, sfiii3nr1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, japanDIPInfo,
+	NULL, sfiii3nr1RomInfo, sfiii3nr1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwidejapanDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
@@ -1802,7 +1802,7 @@ struct BurnDriver BurnDrvSfiii3nar1 = {
 	"Street Fighter III 3rd Strike: Fight for the Future (Asia 990512, NO CD)\0", NULL, "Capcom", "CPS-3",
 	NULL, NULL, NULL, NULL,
 	BDF_GAME_WORKING | BDF_16BIT_ONLY | BDF_CLONE | BDF_HISCORE_SUPPORTED, 2, HARDWARE_CAPCOM_CPS3 | HARDWARE_CAPCOM_CPS3_NO_CD, GBF_VSFIGHT, FBF_SF,
-	NULL, sfiii3nar1RomInfo, sfiii3nar1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, asiaDIPInfo,
+	NULL, sfiii3nar1RomInfo, sfiii3nar1RomName, NULL, NULL, NULL, NULL, cps3InputInfo, sfiiiwideasiaDIPInfo,
 	sfiii3Init, cps3Exit, cps3Frame, DrvCps3Draw, cps3Scan, &cps3_palette_change, 0x40000,
 	384, 224, 4, 3
 };
