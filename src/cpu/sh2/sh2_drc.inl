@@ -27,6 +27,7 @@ extern "C" int getVMBlock();
 #endif
 
 SH2_DRC sh2s[2];
+u32 sh2_drc_idle_pc = ~0;
 struct PicoInterface PicoIn;
 struct Pico32x Pico32x;
 static struct Pico32xMem drc_mem;
@@ -171,6 +172,16 @@ static INT32 Sh2DrcCyclesDone()
 	return (INT32)drc->cycles_timeslice - drc_cycles_left();
 }
 
+// consume cycles, at most up to the end of the timeslice so timers stay exact
+static void Sh2DrcBurnCycles(INT32 cycles)
+{
+	DRC_SR_ENTER();
+	INT32 left = drc_cycles_left();
+	if (cycles > left) cycles = left;
+	if (cycles > 0) drc->sr -= cycles << 12;
+	DRC_SR_LEAVE();
+}
+
 // stop at the next block boundary. With burn != 0 the cycles left are consumed,
 // else they are handed back to Sh2Run(). SR must have been saved by the caller.
 static void drc_end_timeslice(INT32 burn)
@@ -223,6 +234,12 @@ static void Sh2DrcIrqChanged()
 			drc_end_timeslice(0);
 		DRC_SR_LEAVE();
 	}
+}
+
+extern "C" void REGPARM(1) sh2_drc_idle_hook(SH2_DRC *)
+{
+	if (sh2_idle_cb)
+		sh2_idle_cb();
 }
 
 static int REGPARM(2) drc_irq_callback(SH2_DRC *, int level)

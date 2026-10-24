@@ -3705,6 +3705,26 @@ static void REGPARM(2) *sh2_translate_block(SH2 *sh2, int tcache_id)
     }
 #endif
 
+#ifdef DRC_IDLE_HOOK
+    // FBNeo: call the driver's idle loop check before this instruction. It
+    // may burn cycles, i.e. change SR, which is static on all hosts.
+    if (pc == sh2_drc_idle_pc && !(op_flags[i] & OF_DELAY_OP) && skip_op == 0) {
+      sr = rcache_get_reg(SHR_SR, RC_GR_RMW, NULL);
+      FLUSH_CYCLES(sr);
+      emith_sync_t(sr);
+      emit_move_r_imm32(SHR_PC, pc);
+      rcache_clean();
+
+      tmp = rcache_used_hregs_mask();
+      emith_save_caller_regs(tmp);
+      emit_do_static_regs(1, 0);
+      emith_pass_arg_r(0, CONTEXT_REG);
+      emith_abicall(sh2_drc_idle_hook);
+      emith_restore_caller_regs(tmp);
+      emit_do_static_regs(0, 0);
+    }
+#endif
+
     // emit blx area if limits are approached
     if (blx_target_count && (blx_target_count > ARRAY_SIZE(blx_targets)-4 || 
         !emith_jump_patch_inrange(blx_targets[0].ptr, tcache_ptr+0x100))) {

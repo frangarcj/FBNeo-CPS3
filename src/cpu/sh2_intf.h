@@ -52,9 +52,11 @@ void Sh2BurnUntilInt(int);
 typedef UINT32 (*pSh2DmaReadCallback)(UINT32 src, UINT32 data, INT32 size);
 void Sh2SetDmaReadCallback(pSh2DmaReadCallback pCallback);
 
-// non-zero if the SH2 recompiler is in use. It detects idle loops by itself
-// and doesn't track the pc, so pc based speedhacks don't apply.
-INT32 Sh2DrcActive();
+// Idle loop skipping: pCallback is called whenever the cpu (interpreter or
+// recompiler) is about to execute the instruction at nPc. It can look at the
+// registers with Sh2GetRegister() and skip time with Sh2BurnCycles().
+void Sh2SetIdleHook(UINT32 nPc, void (*pCallback)());
+UINT32 Sh2GetRegister(INT32 nReg); // r0-r15
 
 // code in [start, start + len) was changed by other means than SH2 stores
 // to RAM, e.g. by a driver writing to a ROM region

@@ -55,6 +55,7 @@ static void Sh2DrcEndRun();
 static void Sh2DrcWriteCheck(UINT32 a, UINT32 len);
 static INT32 Sh2DrcRun(INT32 cycles);
 static INT32 Sh2DrcCyclesDone();
+static void Sh2DrcBurnCycles(INT32 cycles);
 #endif
 
 int has_sh2;
@@ -213,6 +214,9 @@ static SH2EXT * pSh2Ext;
 static SH2EXT * Sh2Ext = NULL;
 
 static pSh2DmaReadCallback sh2_dma_read_cb = NULL;
+
+static UINT32 sh2_idle_pc = ~0;		// see Sh2SetIdleHook()
+static void (*sh2_idle_cb)() = NULL;
 
 static INT32 core_idle(INT32 cycles)
 {
@@ -505,6 +509,8 @@ void Sh2Exit()
 
 	has_sh2 = 0;
 	sh2_dma_read_cb = NULL;
+	sh2_idle_pc = ~0;
+	sh2_idle_cb = NULL;
 
 #ifdef DRC_SH2
 	Sh2DrcExit();
@@ -3403,6 +3409,10 @@ int Sh2Run(int cycles)
 		if (pSh2Ext->suspend == 0) {
 			UINT16 opcode;
 
+			// the instruction still runs, the loop ends after it if cycles were burned
+			if (!sh2->delay && (sh2->pc & AM) == sh2_idle_pc)
+				sh2_idle_cb();
+
 			if (sh2->delay) {
 				opcode = cpu_readop16(sh2->delay & AM);
 				change_pc(sh2->pc & AM);
@@ -3569,13 +3579,25 @@ void Sh2BurnUntilInt(int)
 #endif
 }
 
-INT32 Sh2DrcActive()
+void Sh2SetIdleHook(UINT32 nPc, void (*pCallback)())
+{
+	sh2_idle_pc = pCallback ? (nPc & AM) : ~0;
+	sh2_idle_cb = pCallback;
+
+#ifdef DRC_SH2
+	sh2_drc_idle_pc = sh2_idle_pc;
+	Sh2DrcFlush(); // the hook is compiled into the translated code
+#endif
+}
+
+UINT32 Sh2GetRegister(INT32 nReg)
 {
 #ifdef DRC_SH2
-	return drc_initted;
-#else
-	return 0;
+	if (drc_in_run) // valid in the idle hook, see sh2_drc_idle_hook()
+		return sh2s[0].r[nReg & 15];
 #endif
+
+	return sh2->r[nReg & 15];
 }
 
 void Sh2InvalidateCode(UINT32 /*start*/, UINT32 /*len*/)
@@ -3626,6 +3648,13 @@ void Sh2BurnCycles(int cycles)
 {
 #if defined FBNEO_DEBUG
 	if (!DebugCPU_SH2Initted) bprintf(PRINT_ERROR, _T("Sh2BurnCycles called without init\n"));
+#endif
+
+#ifdef DRC_SH2
+	if (drc_in_run) {
+		Sh2DrcBurnCycles(cycles);
+		return;
+	}
 #endif
 
 	sh2->sh2_icount -= cycles;

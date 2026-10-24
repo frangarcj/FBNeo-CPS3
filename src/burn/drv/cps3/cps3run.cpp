@@ -1028,52 +1028,40 @@ void __fastcall cps3VidWriteLong(UINT32 addr, UINT32 data)
 }
 
 
-// Speedup for the SH2 interpreter: the task dispatcher checking this task is
-// assumed idle, skip to the end of the current slice of the frame. (Not until
-// the next irq: the dispatcher runs with irqs masked, and would only get on
-// once per frame during boot.)
+// Speedup: the SH2 is idle when its task dispatcher looks at the state of this
+// task, skip to the end of the current slice of the frame. (Not until the next
+// irq: the dispatcher runs with irqs masked, boot would only get on once per
+// frame.) Checked right before the dispatcher's mov.x @Rm,Rn that reads it.
 static INT32 cps3_slice_end = 0;
+static INT32 cps3_speedup_reg = 0;
 
-static inline void cps3_speedup_check(UINT32 addr)
+static void cps3_speedup_check()
 {
-	if (addr == cps3_speedup_ram_address && Sh2GetPC(0) == cps3_speedup_code_address) {
+	if ((Sh2GetRegister(cps3_speedup_reg) & 0xc7ffffff) == cps3_speedup_ram_address) {
 		INT32 left = cps3_slice_end - Sh2TotalCycles();
 		if (left > 0)
 			Sh2BurnCycles(left);
 	}
 }
 
-UINT8 __fastcall cps3RamReadByte(UINT32 addr)
+static void cps3_install_speedup()
 {
-	cps3_speedup_check(addr);
+	UINT32 pc = cps3_speedup_code_address - 2; // the address is the pc after the read
+	if ((pc & 0xff000000) != 0x06000000) return;
 
-	addr &= 0x7ffff;
 #ifdef LSB_FIRST
-	return *(RamMain + (addr ^ 0x03));
+	UINT16 op = *(UINT16 *)(RomGame_D + ((pc & 0x00ffffff) ^ 2));
 #else
-	return *(RamMain + addr);
+	UINT16 op = *(UINT16 *)(RomGame_D + (pc & 0x00ffffff));
 #endif
-}
+	// mov.b/w/l @Rm,Rn or @Rm+,Rn
+	if ((op & 0xf000) != 0x6000 || (op & 0xf) > 6 || (op & 0xf) == 3) {
+		bprintf(PRINT_ERROR, _T("CPS3: unexpected opcode %04x at speedup address %08x\n"), op, pc);
+		return;
+	}
 
-UINT16 __fastcall cps3RamReadWord(UINT32 addr)
-{
-	cps3_speedup_check(addr);
-
-	addr &= 0x7ffff;
-#ifdef LSB_FIRST
-	return *(UINT16 *)(RamMain + (addr ^ 0x02));
-#else
-	return *(UINT16 *)(RamMain + addr);
-#endif
-}
-
-
-UINT32 __fastcall cps3RamReadLong(UINT32 addr)
-{
-	cps3_speedup_check(addr);
-
-	addr &= 0x7ffff;
-	return *(UINT32 *)(RamMain + addr);
+	cps3_speedup_reg = (op >> 4) & 0x0f;
+	Sh2SetIdleHook(pc, cps3_speedup_check);
 }
 
 // CPS3 Region Patch
@@ -1270,10 +1258,6 @@ INT32 cps3Init()
 		Sh2SetDmaReadCallback(cps3_sh2_dma_read);
 		Sh2Open(0);
 
-#ifdef SPEED_HACK
-		cps3speedhack = 1;
-#endif
-
 		// Map sh-2 memory:
 		Sh2MapMemory(RomBios,		0x00000000, 0x0007ffff, MAP_ROM);	// BIOS
 		Sh2MapMemory(RamMain,		0x02000000, 0x0207ffff, MAP_RAM);	// Main RAM
@@ -1327,15 +1311,7 @@ INT32 cps3Init()
 		Sh2SetWriteLongHandler(4, cps3VidWriteLong);
 
 #ifdef SPEED_HACK
-		// install speedup read handler
-		// (the SH2 recompiler does its own idle loop detection)
-		if (!Sh2DrcActive()) {
-			Sh2MapHandler(5,			0x02000000 | (cps3_speedup_ram_address & 0x030000),
-								0x0200ffff | (cps3_speedup_ram_address & 0x030000), MAP_READ);
-			Sh2SetReadByteHandler (5, cps3RamReadByte);
-			Sh2SetReadWordHandler (5, cps3RamReadWord);
-			Sh2SetReadLongHandler (5, cps3RamReadLong);
-		}
+		cps3_install_speedup();
 #endif
 
 	}

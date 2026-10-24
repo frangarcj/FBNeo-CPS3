@@ -56,6 +56,9 @@ void sh2_drc_log(const char *fmt, ...);
 // keep count of blocks marked in drcblk_ram/drcblk_da
 #define DRC_COUNT_MARKED_BLOCKS 1
 
+// call sh2_drc_idle_hook() before the instruction at sh2_drc_idle_pc
+#define DRC_IDLE_HOOK 1
+
 #define SH2_DRCBLK_RAM_SHIFT 1
 #define SH2_DRCBLK_DA_SHIFT  1
 

@@ -127,6 +127,11 @@ void *p32x_sh2_get_mem_ptr(u32 a, u32 *mask, SH2_DRC *sh2);
 void *p32x_sh2_get_code_ptr(u32 a, u32 *mask, SH2_DRC *sh2);
 int p32x_sh2_mem_is_rom(u32 a, SH2_DRC *sh2);
 
+// idle loop hook: called before executing the instruction at sh2_drc_idle_pc,
+// with the guest registers and cycles stored in the context
+extern u32 sh2_drc_idle_pc;
+void REGPARM(1) sh2_drc_idle_hook(SH2_DRC *sh2);
+
 #ifdef __cplusplus
 }
 #endif
