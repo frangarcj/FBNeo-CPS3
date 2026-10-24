@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 # Make the sfiii3 wide screen patch header from the sfiii3ws hack.
 #
-#   mkwidepatch.py <990512 simm1 dir> <sfiii3ws simm1 dir> [<990608 simm1 dir>] > header
+#   mkwidepatch.py <990512 simm1 dir> <sfiii3ws simm1 dir> <990608 simm1 dir> > header
 #
 # Each directory holds sfiii3-simm1.0 .. .3. The patch is the difference of
 # the decrypted programs of the hack and of the 990512 program it is based on,
 # minus the hack's changes that are not about the wide screen (region forced
 # to Oceania and its warning text, used for the hack's credits).
 #
-# With the 990608 program the patch is also ported to it: every block is found
-# by its surrounding bytes, the ROM addresses in it are relocated, and the new
-# code and tables that the hack puts in free space go to free space there.
+# It is ported to the 990608 program: every block is found by its surrounding
+# bytes, the ROM addresses in it are relocated, and the new code and tables
+# that the hack puts in free space go to free space there.
+#
+# Then our own changes for what the hack leaves unfinished (see OURS), made on
+# the 990608 program and ported back to 990512 the same way.
 
 import struct, sys
 
@@ -46,11 +49,11 @@ SKIP = [(0x06005326, 0x06005328),	# region forced to 7
 def word(b, o): return struct.unpack('>I', b[o:o + 4])[0]
 def is_rom(v): return BASE <= v < BASE + 0x1000000
 
-def diff_blocks(old, new):
+def diff_blocks(old, new, skip=()):
 	"""blocks [start, end) of differences, 4-byte aligned"""
 	blocks = []
 	for i in range(len(old)):
-		if old[i] == new[i] or any(s <= BASE + i < e for s, e in SKIP): continue
+		if old[i] == new[i] or any(s <= BASE + i < e for s, e in skip): continue
 		s, e = i & ~3, (i + 4) & ~3
 		if blocks and s - blocks[-1][1] <= 8: blocks[-1][1] = e
 		else: blocks.append([s, e])
@@ -152,15 +155,55 @@ def emit(name, items):
 	print('};')
 	print()
 
-r1, hack = program(sys.argv[1]), program(sys.argv[2])
-blocks = diff_blocks(r1, hack)
+# Our changes, on the 990608 program with the hack applied.
+
+def mirror_bg_block(b, addr, side):
+	"""A background block of 16x16 cells (tile, attributes: 2 bytes each) whose
+	4 columns on one side are blank in 4:3: fill them with the columns next to
+	them, flipped horizontally."""
+	o = addr - BASE
+	for row in range(16):
+		for k in range(4):
+			dst, src = (k, 7 - k) if side == 'left' else (12 + k, 11 - k)
+			cell = b[o + (row * 16 + src) * 4: o + (row * 16 + src) * 4 + 4]
+			cell[2] ^= 0x10		# x flip
+			b[o + (row * 16 + dst) * 4: o + (row * 16 + dst) * 4 + 4] = cell
+
+def ours(b):
+	# character select: orange background
+	for addr, side in ((0x064ead20, 'left'), (0x064eb120, 'right'), (0x064eb520, 'left'), (0x064eb920, 'right')):
+		mirror_bg_block(b, addr, side)
+
+def apply(b, items):
+	b = bytearray(b)
+	for addr, old, new in items:
+		o = addr - BASE
+		assert b[o:o + len(old)] == old
+		b[o:o + len(new)] = new
+	return b
+
+r1, hack, n6 = program(sys.argv[1]), program(sys.argv[2]), program(sys.argv[3])
+
+hack_blocks = diff_blocks(r1, hack, SKIP)
+items512 = [(BASE + s, bytes(r1[s:e]), bytes(hack[s:e])) for s, e in hack_blocks]
+items608 = [(BASE + t, old, new) for s, e, t, old, new in port(r1, hack, n6, hack_blocks)]
+
+n6h = apply(n6, items608)
+mine = bytearray(n6h)
+ours(mine)
+mine_blocks = diff_blocks(n6h, mine)
+r1h = apply(r1, items512)
+for s, e in mine_blocks:
+	assert n6h[s:e] == n6[s:e], 'our change at %08x overlaps the hack' % (BASE + s)
+	items608.append((BASE + s, bytes(n6[s:e]), bytes(mine[s:e])))
+for s, e, t, old, new in port(n6h, mine, r1h, mine_blocks):
+	assert r1h[t:t + e - s] == r1[t:t + e - s], 'our change at %08x overlaps the hack' % (BASE + t)
+	items512.append((BASE + t, old, new))
 
 print('// sfiii3 wide screen patch, made by tools/cps3bench/mkwidepatch.py from the')
-print('// sfiii3ws hack (20220908) and the 990512 program it is based on, and ported')
-print('// to the 990608 program. Addresses and bytes as the SH-2 sees them')
-print('// (decrypted, big endian).')
+print('// sfiii3ws hack (20220908) and the 990512 program it is based on, ported to')
+print('// the 990608 program, plus our own changes. Addresses and bytes as the SH-2')
+print('// sees them (decrypted, big endian).')
 print()
-emit('sfiii3_wide_990512', [(BASE + s, bytes(r1[s:e]), bytes(hack[s:e])) for s, e in blocks])
-if len(sys.argv) > 3:
-	n6 = program(sys.argv[3])
-	emit('sfiii3_wide_990608', [(BASE + t, old, new) for s, e, t, old, new in port(r1, hack, n6, blocks)])
+emit('sfiii3_wide_990512', sorted(items512))
+emit('sfiii3_wide_990608', sorted(items608))
