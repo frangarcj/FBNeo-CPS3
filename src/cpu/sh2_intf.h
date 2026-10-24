@@ -51,6 +51,10 @@ void Sh2BurnUntilInt(int);
 // and doesn't track the pc, so pc based speedhacks don't apply.
 INT32 Sh2DrcActive();
 
+// code in [start, start + len) was changed by other means than SH2 stores
+// to RAM, e.g. by a driver writing to a ROM region
+void Sh2InvalidateCode(UINT32 start, UINT32 len);
+
 INT32 Sh2TotalCycles();
 void Sh2NewFrame();
 void Sh2BurnCycles(int cycles);

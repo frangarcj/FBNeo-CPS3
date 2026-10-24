@@ -17,7 +17,11 @@
 #include <sys/mman.h>
 #elif defined(VITA)
 #include <psp2/kernel/sysmem.h>
-extern "C" int getVMBlock(); // RWX block reserved by the frontend
+#include "drc/drc/cmn.h"
+// RetroArch's bootstrap reserves an RWX block of this size, see getVMBlock()
+extern "C" int _newlib_vm_size_user;
+int _newlib_vm_size_user = DRC_TCACHE_SIZE;
+extern "C" int getVMBlock();
 #elif !defined(_WIN32)
 #include <sys/mman.h>
 #endif
@@ -38,6 +42,7 @@ static sh2_drc_memmap drc_read32_map[SH2_PAGE_COUNT];
 static const void *drc_write8_tab[SH2_PAGE_COUNT];
 static const void *drc_write16_tab[SH2_PAGE_COUNT];
 static const void *drc_write32_tab[SH2_PAGE_COUNT];
+static UINT8 drc_page_is_rom[SH2_PAGE_COUNT];	// see p32x_sh2_mem_is_rom()
 
 static INT32 drc_run_icount;	// sh2->sh2_icount when the current timeslice started
 static INT32 drc_poll_count;
@@ -384,16 +389,20 @@ extern "C" void *p32x_sh2_get_code_ptr(u32 a, u32 *mask, SH2_DRC *)
 // not directly writable.
 extern "C" int p32x_sh2_mem_is_rom(u32 a, SH2_DRC *)
 {
-	unsigned char *r = drc_page(a, 0);
-	return (uintptr_t)r >= SH2_MAXHANDLER && r == drc_page(a, 2) && (uintptr_t)drc_page(a, 1) < SH2_MAXHANDLER;
+	return drc_page_is_rom[a >> SH2_SHIFT];
 }
 
 // ---------------------------------------------------------------------------
 // memory map
 
-static void drc_map_update_page(UINT32 page)
+// returns non-zero if the page was treated as ROM before
+static INT32 drc_map_update_page(UINT32 page)
 {
 	unsigned char *pr = pSh2Ext->MemMap[page];
+	INT32 was_rom = drc_page_is_rom[page];
+
+	drc_page_is_rom[page] = (uintptr_t)pr >= SH2_MAXHANDLER && pr == pSh2Ext->MemMap[page + SH2_WADD * 2]
+		&& (uintptr_t)pSh2Ext->MemMap[page + SH2_WADD] < SH2_MAXHANDLER;
 
 	if ((uintptr_t)pr >= SH2_MAXHANDLER) {
 		drc_read8_map[page].addr  = drc_read16_map[page].addr  = drc_read32_map[page].addr  = DRC_MAP_MEMORY(pr);
@@ -406,6 +415,8 @@ static void drc_map_update_page(UINT32 page)
 	drc_write8_tab[page]  = (const void *)p32x_sh2_write8;
 	drc_write16_tab[page] = (const void *)p32x_sh2_write16;
 	drc_write32_tab[page] = (const void *)p32x_sh2_write32;
+
+	return was_rom;
 }
 
 static void drc_map_update_pointers()
@@ -429,15 +440,18 @@ static void Sh2DrcMapChanged(UINT32 nStart, UINT32 nEnd, INT32 nType)
 	if (!drc_initted)
 		return;
 
+	// translated code may have constants folded from pages treated as ROM
+	INT32 flush = nType & 0x04 /*SM_FETCH*/;
+
 	for (UINT64 a = nStart & ~SH2_PAGEM; a <= nEnd; a += SH2_PAGE_SIZE) {
-		drc_map_update_page(a >> SH2_SHIFT);
+		flush |= drc_map_update_page(a >> SH2_SHIFT);
 		if (nStart < 0x08000000)
 			for (UINT32 m = 1; m < 8; m++)
-				drc_map_update_page((a >> SH2_SHIFT) + m * (0x08000000 >> SH2_SHIFT));
+				flush |= drc_map_update_page((a >> SH2_SHIFT) + m * (0x08000000 >> SH2_SHIFT));
 	}
 	drc_map_update_pointers();
 
-	if (nType & 0x04 /*SM_FETCH*/)
+	if (flush)
 		sh2_drc_flush_all();
 }
 

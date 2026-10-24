@@ -3563,6 +3563,14 @@ INT32 Sh2DrcActive()
 #endif
 }
 
+void Sh2InvalidateCode(UINT32 /*start*/, UINT32 /*len*/)
+{
+#ifdef DRC_SH2
+	// rare, no need to be more selective
+	Sh2DrcFlush();
+#endif
+}
+
 void Sh2StopRun()
 {
 #if defined FBNEO_DEBUG
