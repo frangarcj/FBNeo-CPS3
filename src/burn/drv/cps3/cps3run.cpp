@@ -266,10 +266,29 @@ static void cps3_decrypt_bios(void)
 	UINT32 * coderegion = (UINT32 *)RomBios;
 	for (INT32 i=0; i<0x20000; i+=4) {
 		UINT32 xormask = cps3_mask(i, cps3_key1, cps3_key2);
-		/* a bit of a hack, don't decrypt the FLASH commands which are transfered by SH2 DMA */
-		if ( (i<0x1ff00) || (i>0x1ff6b) )
-			coderegion[i/4] ^= xormask;
+		coderegion[i/4] ^= xormask;
 	}
+}
+
+// The SH2 DMA bypasses the decryption, so reapply the encryption to what it
+// reads from the BIOS and program flash, as in MAME. This is how the flash
+// commands in the BIOS and the ROM checks get the data they expect.
+static UINT32 cps3_sh2_dma_read(UINT32 src, UINT32 data, INT32 size)
+{
+	UINT32 xormask;
+
+	if (src < 0x80000)
+		xormask = cps3_mask(src & ~3, cps3_key1, cps3_key2);
+	else if (src >= 0x06000000 && src < 0x07000000 && !cps3_isSpecial)
+		xormask = cps3_mask(src & ~3, cps3_key1, cps3_key2);
+	else
+		return data;
+
+	switch (size) {
+		case 0: return data ^ ((xormask >> ((~src & 3) * 8)) & 0xff);
+		case 1: return data ^ (xormask & 0xffff); // both halves of the mask are the same
+	}
+	return data ^ xormask;
 }
 
 static void cps3_decrypt_game(void)
@@ -1255,6 +1274,7 @@ INT32 cps3Init()
 
 	{
 		Sh2Init(1);
+		Sh2SetDmaReadCallback(cps3_sh2_dma_read);
 		Sh2Open(0);
 
 #ifdef SPEED_HACK

@@ -47,6 +47,11 @@ void Sh2SetVBR(unsigned int i);
 
 void Sh2BurnUntilInt(int);
 
+// lets the driver modify data read by the on-chip DMA (size: 0 byte, 1 word,
+// 2 long), e.g. on CPS3 where it bypasses the decryption
+typedef UINT32 (*pSh2DmaReadCallback)(UINT32 src, UINT32 data, INT32 size);
+void Sh2SetDmaReadCallback(pSh2DmaReadCallback pCallback);
+
 // non-zero if the SH2 recompiler is in use. It detects idle loops by itself
 // and doesn't track the pc, so pc based speedhacks don't apply.
 INT32 Sh2DrcActive();

@@ -212,6 +212,8 @@ typedef struct
 static SH2EXT * pSh2Ext;
 static SH2EXT * Sh2Ext = NULL;
 
+static pSh2DmaReadCallback sh2_dma_read_cb = NULL;
+
 static INT32 core_idle(INT32 cycles)
 {
 	Sh2Idle(cycles);
@@ -502,6 +504,7 @@ void Sh2Exit()
 #endif
 
 	has_sh2 = 0;
+	sh2_dma_read_cb = NULL;
 
 #ifdef DRC_SH2
 	Sh2DrcExit();
@@ -3019,6 +3022,17 @@ static void sh2_dmac_callback(int dma)
 //	cpuintrf_pop_context();
 }
 
+void Sh2SetDmaReadCallback(pSh2DmaReadCallback pCallback)
+{
+	sh2_dma_read_cb = pCallback;
+}
+
+static inline UINT32 sh2_dma_read(UINT32 src, INT32 size)
+{
+	UINT32 data = (size == 0) ? RB(src) : (size == 1) ? RW(src) : RL(src);
+	return sh2_dma_read_cb ? sh2_dma_read_cb(src, data, size) : data;
+}
+
 static void sh2_dmac_check(int dma)
 {
 	if(sh2->m[0x63+4*dma] & sh2->m[0x6c] & 1)
@@ -3066,7 +3080,7 @@ static void sh2_dmac_check(int dma)
 					if(incd == 2)
 						dst --;
 					//program_write_byte_32be(dst, program_read_byte_32be(src));
-					WB(dst, RB(src));
+					WB(dst, sh2_dma_read(src, 0));
 					if(incs == 1)
 						src ++;
 					if(incd == 1)
@@ -3083,7 +3097,7 @@ static void sh2_dmac_check(int dma)
 					if(incd == 2)
 						dst -= 2;
 					//program_write_word_32be(dst, program_read_word_32be(src));
-					WW(dst, RW(src));
+					WW(dst, sh2_dma_read(src, 1));
 					if(incs == 1)
 						src += 2;
 					if(incd == 1)
@@ -3101,7 +3115,7 @@ static void sh2_dmac_check(int dma)
 						dst -= 4;
 						
 					//program_write_dword_32be(dst, program_read_dword_32be(src));
-					WL(dst, RL(src));
+					WL(dst, sh2_dma_read(src, 2));
 					
 					if(incs == 1)
 						src += 4;
@@ -3118,10 +3132,10 @@ static void sh2_dmac_check(int dma)
 				{
 					if(incd == 2)
 						dst -= 16;
-					WL(dst, RL(src));
-					WL(dst+4, RL(src+4));
-					WL(dst+8, RL(src+8));
-					WL(dst+12, RL(src+12));
+					WL(dst, sh2_dma_read(src, 2));
+					WL(dst+4, sh2_dma_read(src+4, 2));
+					WL(dst+8, sh2_dma_read(src+8, 2));
+					WL(dst+12, sh2_dma_read(src+12, 2));
 					//program_write_dword_32be(dst, program_read_dword_32be(src));
 					//program_write_dword_32be(dst+4, program_read_dword_32be(src+4));
 					//program_write_dword_32be(dst+8, program_read_dword_32be(src+8));
