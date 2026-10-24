@@ -35,12 +35,15 @@ def mask(addr):
 	val ^= (addr & 0xffff) ^ (KEY2 & 0xffff)
 	return val | (val << 16)
 
-def program(d):
-	s = [open('%s/sfiii3-simm1.%d' % (d, i), 'rb').read() for i in range(4)]
+SIMM2 = BASE + 0x800000
+
+def program(d, simm=1):
+	s = [open('%s/sfiii3-simm%d.%d' % (d, simm, i), 'rb').read() for i in range(4)]
+	base = BASE if simm == 1 else SIMM2
 	out = bytearray()
 	for i in range(len(s[0])):
 		w = (s[0][i] << 24) | (s[1][i] << 16) | (s[2][i] << 8) | s[3][i]
-		out += struct.pack('>I', w ^ mask(BASE + i * 4))
+		out += struct.pack('>I', w ^ mask(base + i * 4))
 	return out
 
 SKIP = [(0x06005326, 0x06005328),	# region forced to 7
@@ -169,10 +172,34 @@ def mirror_bg_block(b, addr, side):
 			cell[2] ^= 0x10		# x flip
 			b[o + (row * 16 + dst) * 4: o + (row * 16 + dst) * 4 + 4] = cell
 
+free = [0x06e5e940]		# free space at the end of simm2 (zeros up to 0x06fff000)
+
+def extend_cel(b, addr, extra):
+	"""A sprite cel: header (flags, size of its graphics load list, number of
+	loads, number of sprites), palette, load list, sprites (tile, attributes,
+	x, y and size: 2 bytes each). Copy it to free space with the extra sprites
+	added, and point to the copy wherever it was pointed to."""
+	o = addr - BASE
+	flags, dma_size, dma_n, count = struct.unpack('>HHHH', b[o:o + 8])
+	size = 8 + 4 + dma_size + count * 8
+	cel = bytearray(b[o:o + size])
+	cel[6:8] = struct.pack('>H', count + len(extra))
+	for spr in extra: cel += struct.pack('>HHHH', *spr)
+	new = free[0]
+	free[0] = (new + len(cel) + 15) & ~15
+	n = new - BASE
+	assert not any(b[n - 16:n + len(cel) + 16])
+	b[n:n + len(cel)] = cel
+	refs = [i for i in range(0, len(b), 4) if word(b, i) == addr]
+	assert refs, 'no reference to %08x' % addr
+	for i in refs: b[i:i + 4] = struct.pack('>I', new)
+
 def ours(b):
 	# character select: orange background
 	for addr, side in ((0x064ead20, 'left'), (0x064eb120, 'right'), (0x064eb520, 'left'), (0x064eb920, 'right')):
 		mirror_bg_block(b, addr, side)
+	# FIRST STAGE banner: two more columns of its red tile at the right end
+	extend_cel(b, 0x06d5d3d8, [(0x36, 0x205, x, y) for x in (0x1f8, 0x208) for y in (0x5ff8, 0x5008)])
 
 def apply(b, items):
 	b = bytearray(b)
@@ -183,16 +210,22 @@ def apply(b, items):
 	return b
 
 r1, hack, n6 = program(sys.argv[1]), program(sys.argv[2]), program(sys.argv[3])
+n6s2 = program(sys.argv[3], 2)	# simm2: the same in all revisions
 
 hack_blocks = diff_blocks(r1, hack, SKIP)
 items512 = [(BASE + s, bytes(r1[s:e]), bytes(hack[s:e])) for s, e in hack_blocks]
 items608 = [(BASE + t, old, new) for s, e, t, old, new in port(r1, hack, n6, hack_blocks)]
 
-n6h = apply(n6, items608)
+n6h = apply(n6, items608) + n6s2
 mine = bytearray(n6h)
 ours(mine)
 mine_blocks = diff_blocks(n6h, mine)
-r1h = apply(r1, items512)
+for s, e in [x for x in mine_blocks if BASE + x[0] >= SIMM2]:
+	items608.append((BASE + s, bytes(n6h[s:e]), bytes(mine[s:e])))
+	items512.append((BASE + s, bytes(n6h[s:e]), bytes(mine[s:e])))
+mine_blocks = [x for x in mine_blocks if BASE + x[0] < SIMM2]
+n6h, mine = n6h[:len(n6)], mine[:len(n6)]
+r1h = apply(r1, [x for x in items512 if x[0] < SIMM2])
 for s, e in mine_blocks:
 	assert n6h[s:e] == n6[s:e], 'our change at %08x overlaps the hack' % (BASE + s)
 	items608.append((BASE + s, bytes(n6[s:e]), bytes(mine[s:e])))
