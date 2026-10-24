@@ -12,8 +12,9 @@
 #   - retroarch.cfg with log_to_file = "true", libretro_log_level = "0"
 # RetroArch is built with VITA_AUTOLOAD_CONTENT=1 (see platform_psp.c there).
 #
-# Environment: VITA_IP, RA_DIR (RetroArch source), BUILD_DIR (copy of src to
-# build in, so the host objects are left alone).
+# Environment: ROM (Vita path of the game to run, e.g. ux0:/roms/jojon.7z,
+# else the last one), VITA_IP, RA_DIR (RetroArch source), BUILD_DIR (copy of
+# src to build in, so the host objects are left alone).
 
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -38,6 +39,10 @@ make -s -C "$ra" -f Makefile.vita VITA_AUTOLOAD_CONTENT=1 -j6 > "$build/ra.log" 
 echo "nosleep on" | nc -w 3 "$vita" 1338 > /dev/null	# don't let it sleep while we watch
 echo destroy | nc -w 3 "$vita" 1338 > /dev/null
 curl -s --max-time 600 -T "$ra/retroarch_vita.self" "ftp://$vita:1337/ux0:/app/RETROARCH/fbneo_cps3_libretro.self"
+if [ -n "${ROM:-}" ]; then	# Vita path of the game to run instead of the last one
+	printf '%s' "$ROM" > "$build/autoload.txt"
+	curl -s --max-time 30 -T "$build/autoload.txt" "ftp://$vita:1337/ux0:/data/retroarch/autoload.txt"
+fi
 
 log="$build/retroarch.log"
 # the first launch right after uploading sometimes hangs, so retry once
