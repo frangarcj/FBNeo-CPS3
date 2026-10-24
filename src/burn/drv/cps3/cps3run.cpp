@@ -21,6 +21,7 @@ Port to FBA by OopsWare
 
 #include "cps3.h"
 #include "sh2_intf.h"
+#include "cps3_simd.h"
 
 #define	BE_GFX		1
 #define BE_GFX_CRAM 0   // do not touch!
@@ -111,6 +112,7 @@ static void cps3_start_dma_timer()
 
 static INT32 cps3_gfx_width, cps3_gfx_height;
 static INT32 cps3_gfx_max_x, cps3_gfx_max_y;
+static INT32 cps3_screen_clean_w = 0, cps3_screen_clean_h = 0; // RamScreen area known to be 0
 
 static INT32 nExtraCycles;
 
@@ -1134,6 +1136,8 @@ static INT32 Cps3Reset()
 	spritelist_dma_cycle = -1;
 	dma_status = 0;
 
+	cps3_screen_clean_w = cps3_screen_clean_h = 0;
+
 	spritelist_dma = 0;
 	spritelist_dma_prev = 0;
 
@@ -1345,189 +1349,41 @@ INT32 cps3Exit()
 // Only bytes 1 and 3 of each long of SS RAM exist; 4 of them make a tile row.
 static void cps3_draw_ss_tile_row(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy, INT32 x, INT32 line, INT32 row)
 {
-#ifdef LSB_FIRST
-	static const UINT8 lane[4] = { 2, 0, 6, 4 };
-#else
-	static const UINT8 lane[4] = { 1, 3, 5, 7 };
-#endif
 	if (x <= -8 || x >= cps3_gfx_width) return;
 
 	UINT8 *src = (UINT8 *)RamSS + code * 64 + (flipy ? 7 - row : row) * 8;
-	UINT16 *dst = (UINT16 *)pBurnDraw + line * cps3_gfx_width;
-	UINT16 *color = Cps3CurPal + (pal << 4);
+#ifdef LSB_FIRST
+	UINT32 pixels = src[2] | (src[0] << 8) | (src[6] << 16) | (src[4] << 24);
+#else
+	UINT32 pixels = src[1] | (src[3] << 8) | (src[5] << 16) | (src[7] << 24);
+#endif
+	if (pixels == 0) return; // 8 transparent pixels, most of the layer
 
-	for (INT32 i = 0; i < 8; i++) {
-		INT32 px = x + (flipx ? 7 - i : i);
-		UINT8 c = src[lane[i >> 1]];
-		c = (i & 1) ? (c >> 4) : (c & 0xf);
-		if (c && px >= 0 && px < cps3_gfx_width)
-			dst[px] = color[c];
+	UINT16 *dst = (UINT16 *)pBurnDraw + line * cps3_gfx_width + x;
+	UINT16 *color = Cps3CurPal + (pal << 4);
+	INT32 step = 1;
+
+	if (flipx) {
+		dst += 7;
+		step = -1;
+	}
+
+	if (x >= 0 && x + 8 <= cps3_gfx_width) {
+		for (INT32 i = 0; i < 8; i++, dst += step, pixels >>= 4)
+			if (pixels & 0xf) *dst = color[pixels & 0xf];
+	} else {
+		for (INT32 i = 0, px = flipx ? x + 7 : x; i < 8; i++, dst += step, px += step, pixels >>= 4)
+			if ((pixels & 0xf) && px >= 0 && px < cps3_gfx_width) *dst = color[pixels & 0xf];
 	}
 }
 
+// one line of a 16x16 tile to the render buffer
 static void cps3_drawgfxzoom_1(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy, INT32 x, INT32 y, INT32 drawline)
 {
-	UINT32 * dst = RamScreen;
-	UINT8 * src = (UINT8 *) RamCRam;
-	dst += (drawline * 1024 + x);
+	UINT32 * dst = RamScreen + drawline * 1024 + x;
+	UINT8 * src = (UINT8 *) RamCRam + code * 256 + 16 * (flipy ? 15 - (drawline - y) : (drawline - y));
 
-#if BE_GFX_CRAM
-
-	if ( flipy ) {
-		src += code * 256 + 16 * (15 - (drawline - y));
-		if ( flipx ) {
-			if ( src[ 0] ) dst[15] = src[ 0] | pal;
-			if ( src[ 1] ) dst[14] = src[ 1] | pal;
-			if ( src[ 2] ) dst[13] = src[ 2] | pal;
-			if ( src[ 3] ) dst[12] = src[ 3] | pal;
-			if ( src[ 4] ) dst[11] = src[ 4] | pal;
-			if ( src[ 5] ) dst[10] = src[ 5] | pal;
-			if ( src[ 6] ) dst[ 9] = src[ 6] | pal;
-			if ( src[ 7] ) dst[ 8] = src[ 7] | pal;
-			if ( src[ 8] ) dst[ 7] = src[ 8] | pal;
-			if ( src[ 9] ) dst[ 6] = src[ 9] | pal;
-			if ( src[10] ) dst[ 5] = src[10] | pal;
-			if ( src[11] ) dst[ 4] = src[11] | pal;
-			if ( src[12] ) dst[ 3] = src[12] | pal;
-			if ( src[13] ) dst[ 2] = src[13] | pal;
-			if ( src[14] ) dst[ 1] = src[14] | pal;
-			if ( src[15] ) dst[ 0] = src[15] | pal;
-		} else {
-			if ( src[ 0] ) dst[ 0] = src[ 0] | pal;
-			if ( src[ 1] ) dst[ 1] = src[ 1] | pal;
-			if ( src[ 2] ) dst[ 2] = src[ 2] | pal;
-			if ( src[ 3] ) dst[ 3] = src[ 3] | pal;
-			if ( src[ 4] ) dst[ 4] = src[ 4] | pal;
-			if ( src[ 5] ) dst[ 5] = src[ 5] | pal;
-			if ( src[ 6] ) dst[ 6] = src[ 6] | pal;
-			if ( src[ 7] ) dst[ 7] = src[ 7] | pal;
-			if ( src[ 8] ) dst[ 8] = src[ 8] | pal;
-			if ( src[ 9] ) dst[ 9] = src[ 9] | pal;
-			if ( src[10] ) dst[10] = src[10] | pal;
-			if ( src[11] ) dst[11] = src[11] | pal;
-			if ( src[12] ) dst[12] = src[12] | pal;
-			if ( src[13] ) dst[13] = src[13] | pal;
-			if ( src[14] ) dst[14] = src[14] | pal;
-			if ( src[15] ) dst[15] = src[15] | pal;
-		}
-	} else {
-		src += code * 256 + 16 * (drawline - y);
-		if ( flipx ) {
-			if ( src[ 0] ) dst[15] = src[ 0] | pal;
-			if ( src[ 1] ) dst[14] = src[ 1] | pal;
-			if ( src[ 2] ) dst[13] = src[ 2] | pal;
-			if ( src[ 3] ) dst[12] = src[ 3] | pal;
-			if ( src[ 4] ) dst[11] = src[ 4] | pal;
-			if ( src[ 5] ) dst[10] = src[ 5] | pal;
-			if ( src[ 6] ) dst[ 9] = src[ 6] | pal;
-			if ( src[ 7] ) dst[ 8] = src[ 7] | pal;
-			if ( src[ 8] ) dst[ 7] = src[ 8] | pal;
-			if ( src[ 9] ) dst[ 6] = src[ 9] | pal;
-			if ( src[10] ) dst[ 5] = src[10] | pal;
-			if ( src[11] ) dst[ 4] = src[11] | pal;
-			if ( src[12] ) dst[ 3] = src[12] | pal;
-			if ( src[13] ) dst[ 2] = src[13] | pal;
-			if ( src[14] ) dst[ 1] = src[14] | pal;
-			if ( src[15] ) dst[ 0] = src[15] | pal;
-		} else {
-			if ( src[ 0] ) dst[ 0] = src[ 0] | pal;
-			if ( src[ 1] ) dst[ 1] = src[ 1] | pal;
-			if ( src[ 2] ) dst[ 2] = src[ 2] | pal;
-			if ( src[ 3] ) dst[ 3] = src[ 3] | pal;
-			if ( src[ 4] ) dst[ 4] = src[ 4] | pal;
-			if ( src[ 5] ) dst[ 5] = src[ 5] | pal;
-			if ( src[ 6] ) dst[ 6] = src[ 6] | pal;
-			if ( src[ 7] ) dst[ 7] = src[ 7] | pal;
-			if ( src[ 8] ) dst[ 8] = src[ 8] | pal;
-			if ( src[ 9] ) dst[ 9] = src[ 9] | pal;
-			if ( src[10] ) dst[10] = src[10] | pal;
-			if ( src[11] ) dst[11] = src[11] | pal;
-			if ( src[12] ) dst[12] = src[12] | pal;
-			if ( src[13] ) dst[13] = src[13] | pal;
-			if ( src[14] ) dst[14] = src[14] | pal;
-			if ( src[15] ) dst[15] = src[15] | pal;
-		}
-	}
-	
-#else
-
-	if ( flipy ) {
-		src += code * 256 + 16 * (15 - (drawline - y));
-		if ( flipx ) {
-			if ( src[ 3] ) dst[15] = src[ 3] | pal;
-			if ( src[ 2] ) dst[14] = src[ 2] | pal;
-			if ( src[ 1] ) dst[13] = src[ 1] | pal;
-			if ( src[ 0] ) dst[12] = src[ 0] | pal;
-			if ( src[ 7] ) dst[11] = src[ 7] | pal;
-			if ( src[ 6] ) dst[10] = src[ 6] | pal;
-			if ( src[ 5] ) dst[ 9] = src[ 5] | pal;
-			if ( src[ 4] ) dst[ 8] = src[ 4] | pal;
-			if ( src[11] ) dst[ 7] = src[11] | pal;
-			if ( src[10] ) dst[ 6] = src[10] | pal;
-			if ( src[ 9] ) dst[ 5] = src[ 9] | pal;
-			if ( src[ 8] ) dst[ 4] = src[ 8] | pal;
-			if ( src[15] ) dst[ 3] = src[15] | pal;
-			if ( src[14] ) dst[ 2] = src[14] | pal;
-			if ( src[13] ) dst[ 1] = src[13] | pal;
-			if ( src[12] ) dst[ 0] = src[12] | pal;
-		} else {
-			if ( src[ 3] ) dst[ 0] = src[ 3] | pal;
-			if ( src[ 2] ) dst[ 1] = src[ 2] | pal;
-			if ( src[ 1] ) dst[ 2] = src[ 1] | pal;
-			if ( src[ 0] ) dst[ 3] = src[ 0] | pal;
-			if ( src[ 7] ) dst[ 4] = src[ 7] | pal;
-			if ( src[ 6] ) dst[ 5] = src[ 6] | pal;
-			if ( src[ 5] ) dst[ 6] = src[ 5] | pal;
-			if ( src[ 4] ) dst[ 7] = src[ 4] | pal;
-			if ( src[11] ) dst[ 8] = src[11] | pal;
-			if ( src[10] ) dst[ 9] = src[10] | pal;
-			if ( src[ 9] ) dst[10] = src[ 9] | pal;
-			if ( src[ 8] ) dst[11] = src[ 8] | pal;
-			if ( src[15] ) dst[12] = src[15] | pal;
-			if ( src[14] ) dst[13] = src[14] | pal;
-			if ( src[13] ) dst[14] = src[13] | pal;
-			if ( src[12] ) dst[15] = src[12] | pal;
-		}
-	} else {
-		src += code * 256 + 16 * (drawline - y);
-		if ( flipx ) {
-			if ( src[ 3] ) dst[15] = src[ 3] | pal;
-			if ( src[ 2] ) dst[14] = src[ 2] | pal;
-			if ( src[ 1] ) dst[13] = src[ 1] | pal;
-			if ( src[ 0] ) dst[12] = src[ 0] | pal;
-			if ( src[ 7] ) dst[11] = src[ 7] | pal;
-			if ( src[ 6] ) dst[10] = src[ 6] | pal;
-			if ( src[ 5] ) dst[ 9] = src[ 5] | pal;
-			if ( src[ 4] ) dst[ 8] = src[ 4] | pal;
-			if ( src[11] ) dst[ 7] = src[11] | pal;
-			if ( src[10] ) dst[ 6] = src[10] | pal;
-			if ( src[ 9] ) dst[ 5] = src[ 9] | pal;
-			if ( src[ 8] ) dst[ 4] = src[ 8] | pal;
-			if ( src[15] ) dst[ 3] = src[15] | pal;
-			if ( src[14] ) dst[ 2] = src[14] | pal;
-			if ( src[13] ) dst[ 1] = src[13] | pal;
-			if ( src[12] ) dst[ 0] = src[12] | pal;
-		} else {
-			if ( src[ 3] ) dst[ 0] = src[ 3] | pal;
-			if ( src[ 2] ) dst[ 1] = src[ 2] | pal;
-			if ( src[ 1] ) dst[ 2] = src[ 1] | pal;
-			if ( src[ 0] ) dst[ 3] = src[ 0] | pal;
-			if ( src[ 7] ) dst[ 4] = src[ 7] | pal;
-			if ( src[ 6] ) dst[ 5] = src[ 6] | pal;
-			if ( src[ 5] ) dst[ 6] = src[ 5] | pal;
-			if ( src[ 4] ) dst[ 7] = src[ 4] | pal;
-			if ( src[11] ) dst[ 8] = src[11] | pal;
-			if ( src[10] ) dst[ 9] = src[10] | pal;
-			if ( src[ 9] ) dst[10] = src[ 9] | pal;
-			if ( src[ 8] ) dst[11] = src[ 8] | pal;
-			if ( src[15] ) dst[12] = src[15] | pal;
-			if ( src[14] ) dst[13] = src[14] | pal;
-			if ( src[13] ) dst[14] = src[13] | pal;
-			if ( src[12] ) dst[15] = src[12] | pal;
-		}
-	}
-
-#endif
+	cps3_line16(dst, src, pal, flipx);
 }
 
 enum
@@ -1595,6 +1451,14 @@ static void cps3_drawgfxzoom_2(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy
 		if( ex > sx ) {
 			switch( transparency ) {
 			case CPS3_TRANSPARENCY_PEN_INDEX:
+				if (dx == (flipx ? -0x10000 : 0x10000) && ex - sx == 16) {
+					// not zoomed horizontally and fully visible: whole lines at once
+					for( INT32 y=sy; y<ey; y++ ) {
+						cps3_line16(RamScreen + y * 512 * 2 + sx, source_base + (y_index>>16) * 16, pal<<alpha, flipx);
+						y_index += dy;
+					}
+					break;
+				}
 				for( INT32 y=sy; y<ey; y++ ) {
 					UINT8 * source = source_base + (y_index>>16) * 16;
 					UINT32 * dest = RamScreen + y * 512 * 2;
@@ -1740,10 +1604,13 @@ INT32 DrvCps3Draw()
 
 	if (nBurnLayer & 1)
 	{
-		UINT32 * pscr = RamScreen;
-		INT32 clrsz = (cps3_gfx_max_x + 1) * sizeof(INT32);
-		for(INT32 yy = 0; yy<=cps3_gfx_max_y; yy++, pscr += 512*2)
-			memset(pscr, 0, clrsz);
+		// the last frame's composite may have cleared it already
+		if (cps3_gfx_max_x + 1 > cps3_screen_clean_w || cps3_gfx_max_y + 1 > cps3_screen_clean_h) {
+			UINT32 * pscr = RamScreen;
+			INT32 clrsz = (cps3_gfx_max_x + 1) * sizeof(INT32);
+			for(INT32 yy = 0; yy<=cps3_gfx_max_y; yy++, pscr += 512*2)
+				memset(pscr, 0, clrsz);
+		}
 	}
 	else
 	{
@@ -1754,6 +1621,8 @@ INT32 DrvCps3Draw()
 			RamScreen[i] = 0x20000;
 		}
 	}
+
+	cps3_screen_clean_w = cps3_screen_clean_h = 0;
 
 	UINT32 *SprSrc = (cps3_fake_dip & 1 ? RamSpr : SprList);
 
@@ -1909,6 +1778,22 @@ INT32 DrvCps3Draw()
 		}
 	}
 	
+	if (fszx == 0x10000 && fszy == 0x10000 && (nBurnLayer & 1))
+	{
+		// no zoom: also clear the buffer for the next frame on the way
+		UINT16 * dstbitmap = (UINT16 * )pBurnDraw;
+
+		for (INT32 rendery = 0; rendery < cps3_gfx_height; rendery++, dstbitmap += cps3_gfx_width) {
+			UINT32 * srcbitmap = RamScreen + rendery * 1024;
+			for (INT32 renderx = 0; renderx < cps3_gfx_width; renderx++) {
+				dstbitmap[renderx] = Cps3CurPal[ srcbitmap[renderx] ];
+				srcbitmap[renderx] = 0;
+			}
+		}
+		cps3_screen_clean_w = cps3_gfx_width;
+		cps3_screen_clean_h = cps3_gfx_height;
+	}
+	else
 	{
 		UINT32 srcx, srcy = 0;
 		UINT32 * srcbitmap;
