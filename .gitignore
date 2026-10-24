@@ -35,3 +35,5 @@ src/burner/libretro/m68kmake
 src/burner/libretro/pgmspritecreate
 !gamelist.txt
 !src/dep/generated/
+tools/cps3bench/cps3bench
+src/burner/libretro/*.dylib
