@@ -1186,7 +1186,7 @@ static INT32 cps3_patch_program(const cps3_patch_block *blocks, const UINT8 *byt
 
 // sfiii3's wide screen mode is unfinished: the screens out of the fights keep
 // their 4:3 layout. With the Screen mode dip at Wide, patch them as the
-// sfiii3ws hack does.
+// sfiii3ws hack does (made for 990512, ported to 990608).
 static INT32 cps3_wide_patched = 0;
 
 static void cps3_update_wide_patch()
@@ -1196,7 +1196,8 @@ static void cps3_update_wide_patch()
 	INT32 want = (cps3_dip & 0x80) ? 1 : 0;
 	if (want == cps3_wide_patched) return;
 
-	if (cps3_patch_program(sfiii3_wide_990512_blocks, sfiii3_wide_990512_bytes, want))
+	if (cps3_patch_program(sfiii3_wide_990608_blocks, sfiii3_wide_990608_bytes, want) ||
+	    cps3_patch_program(sfiii3_wide_990512_blocks, sfiii3_wide_990512_bytes, want))
 		cps3_wide_patched = want;
 	else if (want)
 		bprintf(PRINT_ERROR, _T("CPS3: no wide screen patch for this sfiii3 revision\n"));
