@@ -1589,7 +1589,10 @@ static inline UINT64 cps3_profile_us()
 #endif
 
 // sh2, sound, video: layers, final copy, SS layer
+// Also the real time per frame (frontend included) and the slowest frame in
+// the core.
 static UINT64 cps3_profile_time[6], cps3_profile_frames;
+static UINT64 cps3_profile_period_start, cps3_profile_frame_sum, cps3_profile_worst;
 
 static void cps3_profile_add(INT32 what, UINT64 start)
 {
@@ -1598,13 +1601,21 @@ static void cps3_profile_add(INT32 what, UINT64 start)
 
 static void cps3_profile_frame()
 {
-	if (++cps3_profile_frames < 600) return;
 	UINT64 *t = cps3_profile_time;
-	bprintf(PRINT_NORMAL, _T("CPS3 profile, us per frame: sh2 %d, sound %d, video %d (layers %d, copy %d, text %d)\n"),
-		(INT32)(t[0] / 600), (INT32)(t[1] / 600), (INT32)((t[3] + t[4] + t[5]) / 600),
-		(INT32)(t[3] / 600), (INT32)(t[4] / 600), (INT32)(t[5] / 600));
+	UINT64 sum = t[0] + t[1] + t[3] + t[4] + t[5];
+	if (sum - cps3_profile_frame_sum > cps3_profile_worst) cps3_profile_worst = sum - cps3_profile_frame_sum;
+	cps3_profile_frame_sum = sum;
+
+	if (++cps3_profile_frames < 600) return;
+	UINT64 now = cps3_profile_us();
+	if (cps3_profile_period_start)
+		bprintf(PRINT_NORMAL, _T("CPS3 profile, us per frame: sh2 %d, sound %d, video %d (layers %d, copy %d, text %d), worst %d, real %d\n"),
+			(INT32)(t[0] / 600), (INT32)(t[1] / 600), (INT32)((t[3] + t[4] + t[5]) / 600),
+			(INT32)(t[3] / 600), (INT32)(t[4] / 600), (INT32)(t[5] / 600),
+			(INT32)cps3_profile_worst, (INT32)((now - cps3_profile_period_start) / 600));
+	cps3_profile_period_start = now;
 	memset(cps3_profile_time, 0, sizeof(cps3_profile_time));
-	cps3_profile_frames = 0;
+	cps3_profile_frames = cps3_profile_frame_sum = cps3_profile_worst = 0;
 }
 #define CPS3_PROFILE_START()		UINT64 profile_start = cps3_profile_us()
 #define CPS3_PROFILE_END(what)		cps3_profile_add(what, profile_start); profile_start = cps3_profile_us()
