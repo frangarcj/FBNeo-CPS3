@@ -89,15 +89,25 @@ static UINT32 paldma_length = 0;
 static UINT32 chardma_source = 0;
 static UINT32 chardma_table_address = 0;
 
-static INT32 dma_timer = 0;
-static UINT16 dma_status = 0;
+// DMA timing as in MAME: palette and character DMA set a busy bit, and irq 10
+// fires 100us later (a guess, actual speed is unknown). The display list DMA
+// is busy for 4us. Times are in SH2 cycles of the current frame, -1 = idle.
+#define CPS3_DMA_IRQ_DELAY		(25000000 / 1000000 * 100)
+#define CPS3_SPRITE_DMA_DELAY	(25000000 / 1000000 * 4)
 
-static INT32 palette_dmas = 0; // debugging
+static INT32 dma_irq_cycle = -1;
+static INT32 spritelist_dma_cycle = -1;
+static UINT16 dma_status = 0;
 
 static UINT16 spritelist_dma = 0;
 static UINT16 spritelist_dma_prev = 0;
 
-static INT32 cps_int10_cnt = 0;
+// (re)start the delay until the DMA irq, the frame loop raises it
+static void cps3_start_dma_timer()
+{
+	dma_irq_cycle = Sh2TotalCycles() + CPS3_DMA_IRQ_DELAY;
+	Sh2StopRun();
+}
 
 static INT32 cps3_gfx_width, cps3_gfx_height;
 static INT32 cps3_gfx_max_x, cps3_gfx_max_y;
@@ -442,23 +452,20 @@ static void cps3_process_character_dma(UINT32 address)
 		UINT32 real_destination =  dat2<<3;
 		UINT32 real_length      = (((dat1&0x001fffff)+1)<<3);
 		
-		if (dat1==0x01000000) break;	// end of list marker
+		if (dat1 & 0x01000000) break;	// end of list marker
 		
 		switch ( dat1 & 0x00e00000 ) {
 		case 0x00800000:
 			chardma_table_address = real_source;
-			Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
 			break;
 		case 0x00400000:
 			cps3_do_char_dma( real_source, real_destination, real_length );
-			Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
 			break;
 		case 0x00600000:
 			//bprintf(PRINT_NORMAL, _T("Character DMA (alt) start %08x to %08x with %d\n"), real_source, real_destination, real_length);
 			/* 8bpp DMA decompression
 			   - this is used on SFIII NG Sean's Stage ONLY */
 			cps3_do_alt_char_dma( real_source, real_destination, real_length );
-			Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
 			break;
 		case 0x00000000:
 			// Red Earth need this. 8192 byte trans to 0x00003000 (from 0x007ec000???)
@@ -468,12 +475,14 @@ static void cps3_process_character_dma(UINT32 address)
 			//memcpy( (UINT8 *)RamCRam + real_destination, RomUser + real_source, real_length );
 			for (INT32 j = 0; j < real_length; j++)
 				((UINT8 *)RamCRam)[real_destination + j] = RomUser[(real_source + j) ^ 3];
-			Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
 			break;
 		default:
 			bprintf(PRINT_NORMAL, _T("Character DMA Unknown DMA List Command Type %08x\n"), dat1);
 		}
 	}
+
+	dma_status |= 2;
+	cps3_start_dma_timer();
 }
 
 static INT32 MemIndex()
@@ -551,6 +560,10 @@ UINT16 __fastcall cps3ReadWord(UINT32 addr)
 #endif
 
 	case 0x040c000c:
+		if (spritelist_dma_cycle != -1 && Sh2TotalCycles() >= spritelist_dma_cycle) {
+			spritelist_dma_cycle = -1;
+			dma_status &= ~1;
+		}
 		return dma_status;
 
 	case 0x040c000e: // ??
@@ -658,7 +671,11 @@ void __fastcall cps3WriteWord(UINT32 addr, UINT16 data)
 	case 0x040c0082:
 		spritelist_dma_prev = spritelist_dma;
 		spritelist_dma = data;
-		if ((spritelist_dma & 9) == 8 && (spritelist_dma_prev & 9) == 9) // 0->1
+		if (spritelist_dma_cycle != -1 && Sh2TotalCycles() >= spritelist_dma_cycle) {
+			spritelist_dma_cycle = -1;
+			dma_status &= ~1;
+		}
+		if (!(dma_status & 1) && (spritelist_dma & 9) == 8 && (spritelist_dma_prev & 9) == 9) // 0->1
 		{
 			for (int i = 0; i < 0x2000/4; i += 4)
 			{
@@ -671,6 +688,10 @@ void __fastcall cps3WriteWord(UINT32 addr, UINT16 data)
 				memcpy(SprList + offs, RamSpr + offs, length*4*sizeof(UINT32)); // copy sublist
 			}
 			memcpy(RamVRegBuf, RamVReg, 0x40 * sizeof(UINT32));
+
+			// busy for a moment, skips the repeated 8/9 writes
+			dma_status |= 1;
+			spritelist_dma_cycle = Sh2TotalCycles() + CPS3_SPRITE_DMA_DELAY;
 		}
 		break;
 
@@ -742,9 +763,7 @@ void __fastcall cps3WriteWord(UINT32 addr, UINT16 data)
 			}
 
 			dma_status |= 4;
-			dma_timer = ((25000000 / 1000000) * 100);
-			palette_dmas++;
-			Sh2StopRun();
+			cps3_start_dma_timer();
 		}
 		break;
 	
@@ -997,11 +1016,24 @@ void __fastcall cps3VidWriteLong(UINT32 addr, UINT32 data)
 }
 
 
+// Speedup for the SH2 interpreter: the task dispatcher checking this task is
+// assumed idle, skip to the end of the current slice of the frame. (Not until
+// the next irq: the dispatcher runs with irqs masked, and would only get on
+// once per frame during boot.)
+static INT32 cps3_slice_end = 0;
+
+static inline void cps3_speedup_check(UINT32 addr)
+{
+	if (addr == cps3_speedup_ram_address && Sh2GetPC(0) == cps3_speedup_code_address) {
+		INT32 left = cps3_slice_end - Sh2TotalCycles();
+		if (left > 0)
+			Sh2BurnCycles(left);
+	}
+}
+
 UINT8 __fastcall cps3RamReadByte(UINT32 addr)
 {
-	if (addr == cps3_speedup_ram_address )
-		if (Sh2GetPC(0) == cps3_speedup_code_address)
-			Sh2BurnUntilInt(0);
+	cps3_speedup_check(addr);
 
 	addr &= 0x7ffff;
 #ifdef LSB_FIRST
@@ -1013,15 +1045,9 @@ UINT8 __fastcall cps3RamReadByte(UINT32 addr)
 
 UINT16 __fastcall cps3RamReadWord(UINT32 addr)
 {
-	//bprintf(PRINT_NORMAL, _T("Ram Attempt to read long value of location %8x\n"), addr);
-	addr &= 0x7ffff;
+	cps3_speedup_check(addr);
 
-	if (addr == cps3_speedup_ram_address )
-		if (Sh2GetPC(0) == cps3_speedup_code_address) {
-			bprintf(PRINT_NORMAL, _T("Ram Attempt to read long value of location %8x\n"), addr);
-			Sh2BurnUntilInt(0);
-		}
-	
+	addr &= 0x7ffff;
 #ifdef LSB_FIRST
 	return *(UINT16 *)(RamMain + (addr ^ 0x02));
 #else
@@ -1032,10 +1058,8 @@ UINT16 __fastcall cps3RamReadWord(UINT32 addr)
 
 UINT32 __fastcall cps3RamReadLong(UINT32 addr)
 {
-	if (addr == cps3_speedup_ram_address )
-		if (Sh2GetPC(0) == cps3_speedup_code_address)
-			Sh2BurnUntilInt(0);
-		
+	cps3_speedup_check(addr);
+
 	addr &= 0x7ffff;
 	return *(UINT32 *)(RamMain + addr);
 }
@@ -1106,13 +1130,12 @@ static INT32 Cps3Reset()
 	chardma_source = 0;
 	chardma_table_address = 0;
 
-	dma_timer = -1;
+	dma_irq_cycle = -1;
+	spritelist_dma_cycle = -1;
 	dma_status = 0;
 
 	spritelist_dma = 0;
 	spritelist_dma_prev = 0;
-
-	cps_int10_cnt = 0;
 
 	cps3SndReset();
 
@@ -2026,6 +2049,29 @@ INT32 DrvCps3Draw()
 	return 0;
 }
 
+// run the SH2 to the given cycle of the frame in slices of nSlice cycles,
+// raising the DMA irq on time
+static void cps3_run_to(INT32 nCycles, INT32 nSlice)
+{
+	while (Sh2TotalCycles() < nCycles) {
+		INT32 end = (Sh2TotalCycles() / nSlice + 1) * nSlice;
+		if (end > nCycles)
+			end = nCycles;
+		if (dma_irq_cycle != -1 && dma_irq_cycle < end)
+			end = dma_irq_cycle;
+		cps3_slice_end = end;
+
+		if (end > Sh2TotalCycles())
+			Sh2Run(end - Sh2TotalCycles());
+
+		if (dma_irq_cycle != -1 && Sh2TotalCycles() >= dma_irq_cycle) {
+			dma_irq_cycle = -1;
+			dma_status &= ~6;
+			Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
+		}
+	}
+}
+
 INT32 cps3Frame()
 {
 	// feels a bit hacky, and sfiii2 can change mode without resetting through its service menu,
@@ -2095,40 +2141,20 @@ INT32 cps3Frame()
 
 	Sh2NewFrame();
 
-	INT32 nInterleave = 4;
-	INT32 nCyclesTotal[1] = { (INT32)((double)25000000 * 100 / nBurnFPS) };
-	INT32 nCyclesDone[1] = { nExtraCycles };
+	INT32 nCyclesTotal = (INT32)((double)25000000 * 100 / nBurnFPS);
 
 	Sh2Idle(nExtraCycles);
-	palette_dmas = 0;
 
-	for (INT32 i = 0; i < nInterleave; i++)
-	{
-		do {
-			if (dma_timer > 0)
-			{
-				nCyclesDone[0] += Sh2Run(dma_timer);
-				dma_timer = -1;
-				dma_status &= ~6;
-				Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
-			}
-			CPU_RUN_SYNCINT(0, Sh2); // (try to) finish line
-		} while (dma_timer != -1);
-
-		if (cps_int10_cnt >= 2) {
-			cps_int10_cnt = 0;
-			Sh2SetIRQLine(10, CPU_IRQSTATUS_ACK);
-		} else cps_int10_cnt++;
-	}
+	// The only irqs are vblank (12) and DMA end (10), as in MAME. The frame
+	// starts at vblank: the irq is raised at its end, right after drawing.
+	cps3_run_to(nCyclesTotal, nCyclesTotal / 4);
 	Sh2SetIRQLine(12, CPU_IRQSTATUS_ACK);
 
-	nExtraCycles = Sh2TotalCycles() - nCyclesTotal[0];
+	nExtraCycles = Sh2TotalCycles() - nCyclesTotal;
 
-#if 0
-	if (palette_dmas || nExtraCycles) {
-		bprintf(0, _T("palette dmas / extra cyc:  %d   %d\n"), palette_dmas, nExtraCycles);
-	}
-#endif
+	// pending events carry over to the next frame
+	if (dma_irq_cycle != -1) dma_irq_cycle = (dma_irq_cycle > nCyclesTotal) ? dma_irq_cycle - nCyclesTotal : 0;
+	if (spritelist_dma_cycle != -1) spritelist_dma_cycle = (spritelist_dma_cycle > nCyclesTotal) ? spritelist_dma_cycle - nCyclesTotal : 0;
 
 	cps3SndUpdate();
 
@@ -2243,7 +2269,8 @@ INT32 cps3Scan(INT32 nAction, INT32 *pnMin)
 		SCAN_VAR(spritelist_dma_prev);
 
 		SCAN_VAR(dma_status);
-		SCAN_VAR(dma_timer);
+		SCAN_VAR(dma_irq_cycle);
+		SCAN_VAR(spritelist_dma_cycle);
 
 		SCAN_VAR(main_flash);
 		
@@ -2251,7 +2278,6 @@ INT32 cps3Scan(INT32 nAction, INT32 *pnMin)
 		SCAN_VAR(lastb);
 		SCAN_VAR(lastb2);
 		
-		SCAN_VAR(cps_int10_cnt);
 
 		SCAN_VAR(nExtraCycles);
 

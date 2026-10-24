@@ -54,6 +54,7 @@ static void Sh2DrcIrqChanged();
 static void Sh2DrcEndRun();
 static void Sh2DrcWriteCheck(UINT32 a, UINT32 len);
 static INT32 Sh2DrcRun(INT32 cycles);
+static INT32 Sh2DrcCyclesDone();
 #endif
 
 int has_sh2;
@@ -3588,6 +3589,11 @@ INT32 Sh2TotalCycles()
 {
 #if defined FBNEO_DEBUG
 	if (!DebugCPU_SH2Initted) bprintf(PRINT_ERROR, _T("Sh2TotalCycles called without init\n"));
+#endif
+
+#ifdef DRC_SH2
+	if (drc_in_run) // only updated at the end of a timeslice
+		return sh2->sh2_total_cycles + Sh2DrcCyclesDone();
 #endif
 
 	return sh2->sh2_total_cycles;

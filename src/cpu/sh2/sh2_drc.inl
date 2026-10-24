@@ -150,6 +150,13 @@ static inline void drc_sync_icount()
 	sh2->sh2_icount = drc_run_icount - ((INT32)drc->cycles_timeslice - drc_cycles_left());
 }
 
+// cycles run so far in the current timeslice
+static INT32 Sh2DrcCyclesDone()
+{
+	DRC_SAVE_SR(drc);
+	return (INT32)drc->cycles_timeslice - drc_cycles_left();
+}
+
 // stop at the next block boundary. With burn != 0 the cycles left are consumed,
 // else they are handed back to Sh2Run(). SR must have been saved by the caller.
 static void drc_end_timeslice(INT32 burn)
