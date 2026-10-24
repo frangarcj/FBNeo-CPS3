@@ -59,7 +59,6 @@ UINT8 cps3_reset = 0;
 UINT8 cps3_palette_change = 0;
 
 UINT32 cps3_key1, cps3_key2, cps3_isSpecial;
-UINT32 cps3_bios_test_hack, cps3_game_test_hack;
 UINT32 cps3_speedup_ram_address, cps3_speedup_code_address;
 UINT8 cps3_dip;
 UINT8 cps3_fake_dip;
@@ -852,44 +851,54 @@ void __fastcall cps3C0WriteLong(UINT32 addr, UINT32 data)
 	bprintf(PRINT_NORMAL, _T("C0 Attempt to write long value %8x to location %8x\n"), data, addr);
 }
 
-// If fastboot != 1 
+// Program flash. Like MAME, data reads return decrypted data, except on
+// sfiii2 which encrypts code and data differently. In read array mode the
+// flash is mapped directly (see cps3_map_game_flash()), these handlers are
+// only used while a flash command is in progress.
+
+static inline UINT8 *cps3_game_flash_data()
+{
+	return cps3_isSpecial ? RomGame : RomGame_D;
+}
 
 UINT8 __fastcall cps3RomReadByte(UINT32 addr)
 {
-//	bprintf(PRINT_NORMAL, _T("Rom Attempt to read byte value of location %8x\n"), addr);
-	addr &= 0xc7ffffff;
+	UINT32 retvalue = cps3_flash_read(&main_flash, addr & 0x00fffffc);
+	if ( main_flash.flash_mode == FM_NORMAL ) {
 #ifdef LSB_FIRST
-	addr ^= 0x03;
+		addr ^= 0x03;
 #endif
-	return *(RomGame_D + (addr & 0x00ffffff));
+		return cps3_game_flash_data()[addr & 0x00ffffff];
+	}
+	return retvalue >> ((~addr & 3) * 8);
 }
 
 UINT16 __fastcall cps3RomReadWord(UINT32 addr)
 {
-//	bprintf(PRINT_NORMAL, _T("Rom Attempt to read word value of location %8x\n"), addr);
-	addr &= 0xc7ffffff;
+	UINT32 retvalue = cps3_flash_read(&main_flash, addr & 0x00fffffc);
+	if ( main_flash.flash_mode == FM_NORMAL ) {
 #ifdef LSB_FIRST
-	addr ^= 0x02;
+		addr ^= 0x02;
 #endif
-	return *(UINT16 *)(RomGame_D + (addr & 0x00ffffff));
+		return *(UINT16 *)(cps3_game_flash_data() + (addr & 0x00ffffff));
+	}
+	return retvalue >> ((~addr & 2) * 8);
 }
 
 UINT32 __fastcall cps3RomReadLong(UINT32 addr)
 {
-//	bprintf(PRINT_NORMAL, _T("Rom Attempt to read long value of location %8x\n"), addr);
-	addr &= 0xc7ffffff;
-	
-	UINT32 retvalue = cps3_flash_read(&main_flash, addr);
+	UINT32 retvalue = cps3_flash_read(&main_flash, addr & 0x00ffffff);
 	if ( main_flash.flash_mode == FM_NORMAL )
-		retvalue = *(UINT32 *)(RomGame_D + (addr & 0x00ffffff));
-	
-	UINT32 pc = Sh2GetPC(0);
-	if (pc == cps3_bios_test_hack || pc == cps3_game_test_hack){
-		if ( main_flash.flash_mode == FM_NORMAL )
-			retvalue = *(UINT32 *)(RomGame + (addr & 0x00ffffff));
-		bprintf(2, _T("CPS3 Hack : read long from %08x [%08x]\n"), addr, retvalue );
-	}
+		retvalue = *(UINT32 *)(cps3_game_flash_data() + (addr & 0x00ffffff));
 	return retvalue;
+}
+
+static void cps3_map_game_flash()
+{
+	if (main_flash.flash_mode == FM_NORMAL)
+		Sh2MapMemory(cps3_game_flash_data(), 0x06000000, 0x06ffffff, MAP_READ);
+	else
+		Sh2MapHandler(2, 0x06000000, 0x06ffffff, MAP_READ);
 }
 
 void __fastcall cps3RomWriteByte(UINT32 addr, UINT8 data)
@@ -906,45 +915,18 @@ void __fastcall cps3RomWriteLong(UINT32 addr, UINT32 data)
 {
 //	bprintf(1, _T("Rom Attempt to write long value %8x to location %8x\n"), data, addr);
 	addr &= 0x00ffffff;
+	INT32 was_normal = main_flash.flash_mode == FM_NORMAL;
 	cps3_flash_write(&main_flash, addr, data);
 	
 	if ( main_flash.flash_mode == FM_NORMAL ) {
 		bprintf(1, _T("Rom Attempt to write long value %8x to location %8x\n"), data, addr);
 		*(UINT32 *)(RomGame + addr) = data;
 		*(UINT32 *)(RomGame_D + addr) = data ^ cps3_mask(addr + 0x06000000, cps3_key1, cps3_key2);
+		Sh2InvalidateCode(0x06000000 + addr, 4);
 	}
-}
 
-UINT8 __fastcall cps3RomReadByteSpe(UINT32 addr)
-{
-//	bprintf(PRINT_NORMAL, _T("Rom Attempt to read byte value of location %8x\n"), addr);
-	addr &= 0xc7ffffff;
-#ifdef LSB_FIRST
-	addr ^= 0x03;
-#endif
-	return *(RomGame + (addr & 0x00ffffff));
-}
-
-UINT16 __fastcall cps3RomReadWordSpe(UINT32 addr)
-{
-//	bprintf(PRINT_NORMAL, _T("Rom Attempt to read word value of location %8x\n"), addr);
-	addr &= 0xc7ffffff;
-#ifdef LSB_FIRST
-	addr ^= 0x02;
-#endif
-	return *(UINT16 *)(RomGame + (addr & 0x00ffffff));
-}
-
-UINT32 __fastcall cps3RomReadLongSpe(UINT32 addr)
-{
-//	bprintf(PRINT_NORMAL, _T("Rom Attempt to read long value of location %8x\n"), addr);
-	addr &= 0xc7ffffff;
-	
-	UINT32 retvalue = cps3_flash_read(&main_flash, addr);
-	if ( main_flash.flash_mode == FM_NORMAL )
-		retvalue = *(UINT32 *)(RomGame + (addr & 0x00ffffff));
-
-	return retvalue;
+	if (was_normal != (main_flash.flash_mode == FM_NORMAL))
+		cps3_map_game_flash();
 }
 
 //------------------
@@ -1279,34 +1261,16 @@ INT32 cps3Init()
 		Sh2SetWriteWordHandler(1, cps3C0WriteWord);
 		Sh2SetWriteLongHandler(1, cps3C0WriteLong);
 
-		if ((!BurnDrvGetHardwareCode()) & HARDWARE_CAPCOM_CPS3_NO_CD) 
-		{
-			if (cps3_isSpecial) {
-				Sh2MapMemory(RomGame,	0x06000000, 0x06ffffff, MAP_READ);	// Decrypted SH2 Code
-				Sh2MapMemory(RomGame_D,	0x06000000, 0x06ffffff, MAP_FETCH);	// Decrypted SH2 Code
-			} else {
-				Sh2MapMemory(RomGame_D,	0x06000000, 0x06ffffff, MAP_READ | MAP_FETCH);	// Decrypted SH2 Code
-			}
-		} else {
-			Sh2MapMemory(RomGame_D,		0x06000000, 0x06ffffff, MAP_FETCH);	// Decrypted SH2 Code
-			Sh2MapHandler(2,		0x06000000, 0x06ffffff, MAP_READ | MAP_WRITE);
+		Sh2MapMemory(RomGame_D,		0x06000000, 0x06ffffff, MAP_FETCH);	// Decrypted SH2 Code
+		Sh2MapHandler(2,		0x06000000, 0x06ffffff, MAP_WRITE);
+		cps3_map_game_flash();
 
-			if (cps3_isSpecial) {
-				Sh2SetReadByteHandler (2, cps3RomReadByteSpe);
-				Sh2SetReadWordHandler (2, cps3RomReadWordSpe);
-				Sh2SetReadLongHandler (2, cps3RomReadLongSpe);
-				Sh2SetWriteByteHandler(2, cps3RomWriteByte);
-				Sh2SetWriteWordHandler(2, cps3RomWriteWord);
-				Sh2SetWriteLongHandler(2, cps3RomWriteLong);
-			} else {
-				Sh2SetReadByteHandler (2, cps3RomReadByte);
-				Sh2SetReadWordHandler (2, cps3RomReadWord);
-				Sh2SetReadLongHandler (2, cps3RomReadLong);
-				Sh2SetWriteByteHandler(2, cps3RomWriteByte);
-				Sh2SetWriteWordHandler(2, cps3RomWriteWord);
-				Sh2SetWriteLongHandler(2, cps3RomWriteLong);
-			}
-		}
+		Sh2SetReadByteHandler (2, cps3RomReadByte);
+		Sh2SetReadWordHandler (2, cps3RomReadWord);
+		Sh2SetReadLongHandler (2, cps3RomReadLong);
+		Sh2SetWriteByteHandler(2, cps3RomWriteByte);
+		Sh2SetWriteWordHandler(2, cps3RomWriteWord);
+		Sh2SetWriteLongHandler(2, cps3RomWriteLong);
 
 		Sh2MapHandler(3,			0x040e0000, 0x040e02ff, MAP_RAM);
 		Sh2SetReadByteHandler (3, cps3SndReadByte);
@@ -2300,6 +2264,8 @@ INT32 cps3Scan(INT32 nAction, INT32 *pnMin)
 			
 			// remap RamCRam
 			bankswitch_cram();
+
+			cps3_map_game_flash();
 		}
 	}
 	

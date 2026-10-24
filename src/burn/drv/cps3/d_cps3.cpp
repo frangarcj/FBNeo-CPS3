@@ -1497,9 +1497,6 @@ static INT32 sfiiiInit()
 	cps3_key2 = 0xfc03925a;
 	cps3_isSpecial = 0;
 
-	cps3_bios_test_hack = 0x000166b4;
-	cps3_game_test_hack = 0x063cdff4;
-
 	cps3_speedup_ram_address  = 0x0200cc6c;
 	cps3_speedup_code_address = 0x06000884;
 
@@ -1514,9 +1511,6 @@ static INT32 sfiii2Init()
 	cps3_key1 = 0x00000000;
 	cps3_key2 = 0x00000000;
 	cps3_isSpecial = 1;
-
-	cps3_bios_test_hack = 0x00000000;
-	cps3_game_test_hack = 0x00000000;
 
 	cps3_speedup_ram_address  = 0x0200dfe4;
 	cps3_speedup_code_address = 0x06000884;
@@ -1533,9 +1527,6 @@ static INT32 sfiii3Init()
 	cps3_key2 = 0x0c129981;
 	cps3_isSpecial = 0;
 
-	cps3_bios_test_hack = 0x00011c44;
-	cps3_game_test_hack = 0x0613ab48;
-
 	cps3_speedup_ram_address  = 0x0200d794;
 	cps3_speedup_code_address = 0x06000884;
 
@@ -1550,9 +1541,6 @@ static INT32 jojor1Init()
 	cps3_key1 = 0x02203ee3;
 	cps3_key2 = 0x01301972;
 	cps3_isSpecial = 0;
-
-	cps3_bios_test_hack = 0x00011c2c;
-	cps3_game_test_hack = 0x06172568;
 
 	cps3_speedup_ram_address  = 0x020223d8;
 	cps3_speedup_code_address = 0x0600065c;
@@ -1569,9 +1557,6 @@ static INT32 jojor2Init()
 	cps3_key2 = 0x01301972;
 	cps3_isSpecial = 0;
 
-	cps3_bios_test_hack = 0x00011c2c;
-	cps3_game_test_hack = 0x06172568;
-
 	cps3_speedup_ram_address  = 0x020223c0;
 	cps3_speedup_code_address = 0x0600065c;
 
@@ -1587,9 +1572,6 @@ static INT32 jojobaInit()
 	cps3_key2 = 0x03021972;
 	cps3_isSpecial = 0;
 
-	cps3_bios_test_hack = 0x00011c90;
-	cps3_game_test_hack = 0x061c45bc;
-
 	cps3_speedup_ram_address  = 0x020267dc;
 	cps3_speedup_code_address = 0x0600065c;
 
@@ -1604,9 +1586,6 @@ static INT32 redearthInit()
 	cps3_key1 = 0x9e300ab1;
 	cps3_key2 = 0xa175b82c;
 	cps3_isSpecial = 0;
-
-	cps3_bios_test_hack = 0x00016530;
-	cps3_game_test_hack = 0x060105f0;
 
 	cps3_speedup_ram_address  = 0x0202136c;
 	cps3_speedup_code_address = 0x0600194e;
