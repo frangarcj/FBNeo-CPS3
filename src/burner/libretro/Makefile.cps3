@@ -36,3 +36,8 @@ ifeq ($(USE_DRC_SH2)$(platform), 1vita)
 $(SH2_DRC_DIR)/sh2/compiler.o $(SH2_DRC_DIR)/drc/cmn.o: CFLAGS += -marm
 $(SH2_CPU_DIR)/sh2.o: CXXFLAGS += -marm
 endif
+
+# log the time spent per frame in the SH2, sound and video
+ifeq ($(CPS3_PROFILE), 1)
+	CXXFLAGS += -DCPS3_PROFILE
+endif

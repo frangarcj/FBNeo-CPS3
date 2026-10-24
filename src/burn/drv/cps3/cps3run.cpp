@@ -1816,13 +1816,37 @@ INT32 DrvCps3Draw()
 		// (sfiii2 intro), rowscroll is used by the 'combo meter' in JoJo games.
 		INT32 scrolly = (-ss_vscroll) & 0x100;
 
+		INT32 row_offset = -1;
+		UINT64 row_used = 0;
+
 		for (INT32 line = 0; line < cps3_gfx_height; line++) {
 			INT32 offset = (((line + scrolly) / 8) * 64) & 0xfff;
 			INT32 rowscroll = (RamSS[0x4000 / 4 + ((line + scrolly - 1) & 0x1ff)] >> 16) & 0xff;
 
+			if (offset != row_offset) {
+				// new row of tiles: find the ones with something to draw
+				row_offset = offset;
+				row_used = 0;
+				for (INT32 x = 0; x < 64; x++) {
+					UINT32 data = RamSS[offset + x];
+					UINT32 tile = ((data >> 16) & 0xff) | ((data & 1) << 8);
+					if (tile == 0) continue;
+
+					const UINT32 *gfx = RamSS + (tile + 0x200) * 16;
+					UINT32 pixels = 0;
+					for (INT32 i = 0; i < 16; i++)
+						pixels |= gfx[i];
+					if (pixels & 0x00ff00ff) // only bytes 1 and 3 exist
+						row_used |= (UINT64)1 << x;
+				}
+			}
+			if (row_used == 0) continue;
+
 			// the layer is 512 pixels wide and wraps, only visit the visible columns
 			for (INT32 col = 0; col <= cps3_gfx_width / 8; col++) {
 				INT32 x = (col + rowscroll / 8) & 63;
+				if (!((row_used >> x) & 1)) continue;
+
 				UINT32 data = RamSS[offset + x];
 				data = ((data >> 16) & 0xff) | ((data & 0xff) << 8);
 				UINT32 tile = data & 0x1ff;
@@ -1839,6 +1863,45 @@ INT32 DrvCps3Draw()
 	}
 	return 0;
 }
+
+#ifdef CPS3_PROFILE
+// Average time spent per frame in the SH2, sound and video, logged every 600
+// frames. Build with CPS3_PROFILE=1.
+#ifdef VITA
+#include <psp2/kernel/processmgr.h>
+static inline UINT64 cps3_profile_us() { return sceKernelGetProcessTimeWide(); }
+#else
+#include <time.h>
+static inline UINT64 cps3_profile_us()
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (UINT64)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+#endif
+
+static UINT64 cps3_profile_time[3], cps3_profile_frames;
+
+static void cps3_profile_add(INT32 what, UINT64 start)
+{
+	cps3_profile_time[what] += cps3_profile_us() - start;
+}
+
+static void cps3_profile_frame()
+{
+	if (++cps3_profile_frames < 600) return;
+	bprintf(PRINT_NORMAL, _T("CPS3 profile, us per frame: sh2 %d, sound %d, video %d\n"),
+		(INT32)(cps3_profile_time[0] / 600), (INT32)(cps3_profile_time[1] / 600), (INT32)(cps3_profile_time[2] / 600));
+	cps3_profile_time[0] = cps3_profile_time[1] = cps3_profile_time[2] = cps3_profile_frames = 0;
+}
+#define CPS3_PROFILE_START()		UINT64 profile_start = cps3_profile_us()
+#define CPS3_PROFILE_END(what)		cps3_profile_add(what, profile_start); profile_start = cps3_profile_us()
+#define CPS3_PROFILE_FRAME()		cps3_profile_frame()
+#else
+#define CPS3_PROFILE_START()
+#define CPS3_PROFILE_END(what)
+#define CPS3_PROFILE_FRAME()
+#endif
 
 // run the SH2 to the given cycle of the frame in slices of nSlice cycles,
 // raising the DMA irq on time
@@ -1938,8 +2001,11 @@ INT32 cps3Frame()
 
 	// The only irqs are vblank (12) and DMA end (10), as in MAME. The frame
 	// starts at vblank: the irq is raised at its end, right after drawing.
+	CPS3_PROFILE_START();
+
 	cps3_run_to(nCyclesTotal, nCyclesTotal / 4);
 	Sh2SetIRQLine(12, CPU_IRQSTATUS_ACK);
+	CPS3_PROFILE_END(0);
 
 	nExtraCycles = Sh2TotalCycles() - nCyclesTotal;
 
@@ -1948,8 +2014,11 @@ INT32 cps3Frame()
 	if (spritelist_dma_cycle != -1) spritelist_dma_cycle = (spritelist_dma_cycle > nCyclesTotal) ? spritelist_dma_cycle - nCyclesTotal : 0;
 
 	cps3SndUpdate();
+	CPS3_PROFILE_END(1);
 
 	if (pBurnDraw) DrvCps3Draw();
+	CPS3_PROFILE_END(2);
+	CPS3_PROFILE_FRAME();
 
 	return 0;
 }
