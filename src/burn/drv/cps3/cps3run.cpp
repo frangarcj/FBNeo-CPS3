@@ -1059,12 +1059,13 @@ static void cps3_speedup_check()
 	}
 }
 
+// instructions are always fetched decrypted, even on sfiii2
 static UINT16 cps3_program_op(UINT32 pc)
 {
 #ifdef LSB_FIRST
-	return *(UINT16 *)(cps3_game_flash_data() + ((pc & 0x00ffffff) ^ 2));
+	return *(UINT16 *)(RomGame_D + ((pc & 0x00ffffff) ^ 2));
 #else
-	return *(UINT16 *)(cps3_game_flash_data() + (pc & 0x00ffffff));
+	return *(UINT16 *)(RomGame_D + (pc & 0x00ffffff));
 #endif
 }
 

@@ -432,6 +432,15 @@ extern "C" int p32x_sh2_mem_is_rom(u32 a, SH2_DRC *)
 	return drc_page_is_rom[a >> SH2_SHIFT];
 }
 
+// Data reads see the same memory as instruction fetches. Not on CPS3 sfiii2,
+// where only the fetches from the program flash are decrypted.
+extern "C" int p32x_sh2_fetch_is_data(u32 a, SH2_DRC *)
+{
+	UINT32 page = a >> SH2_SHIFT;
+	unsigned char *pr = pSh2Ext->MemMap[page];
+	return (uintptr_t)pr >= SH2_MAXHANDLER && pr == pSh2Ext->MemMap[page + SH2_WADD * 2];
+}
+
 // ---------------------------------------------------------------------------
 // memory map
 

@@ -3921,7 +3921,8 @@ static void REGPARM(2) *sh2_translate_block(SH2 *sh2, int tcache_id)
 
     case OP_LOAD_POOL:
 #if PROPAGATE_CONSTANTS
-      if ((opd->imm && opd->imm >= base_pc && opd->imm < end_literals) ||
+      if ((opd->imm && opd->imm >= base_pc && opd->imm < end_literals &&
+           p32x_sh2_fetch_is_data(opd->imm, sh2)) ||
           p32x_sh2_mem_is_rom(opd->imm, sh2))
       {
         if (opd->size == 2)
