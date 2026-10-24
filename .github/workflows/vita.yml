@@ -27,8 +27,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: git.libretro.com:5050/libretro-infrastructure/libretro-build-vita:latest
-      options: --user root
+      image: vitasdk/vitasdk:latest
     outputs:
       retroarch: ${{ steps.retroarch.outputs.tag }}
 
@@ -51,6 +50,9 @@ jobs:
     - name: Build RetroArch with it
       run: |
         git clone --depth 1 --branch "${{ steps.retroarch.outputs.tag }}" https://github.com/libretro/RetroArch.git retroarch
+        # the bundled vita2d takes the matrix as float *, which recent GCC
+        # doesn't let pass (same pointer)
+        sed -i 's/&vita2d->mvp_no_rot);/vita2d->mvp_no_rot.data);/' retroarch/gfx/drivers/vita2d_gfx.c
         cp src/burner/libretro/fbneo_cps3_libretro_vita.a retroarch/libretro_vita.a
         make -C retroarch -f Makefile.vita -j$(getconf _NPROCESSORS_ONLN) retroarch_vita.self
 
