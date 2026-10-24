@@ -744,7 +744,8 @@ void __fastcall cps3WriteWord(UINT32 addr, UINT16 data)
 	case 0x040c00ae:
 		//bprintf(PRINT_NORMAL, _T("palettedma [%04x]  from %08x to %08x fade %08x size %d\n"), data, (paldma_source << 1), paldma_dest, paldma_fade, paldma_length);
 		if (data & 0x0002) {
-			for (UINT32 i=0; i<paldma_length; i++) {
+			UINT32 length = paldma_length | ((data & 1) << 16); // 17 bits, as in MAME
+			for (UINT32 i=0; i<length; i++) {
 				UINT16 * src = (UINT16 *)RomUser;
 				UINT16 coldata = src[(paldma_source - 0x200000 + i)];
 				
@@ -766,12 +767,13 @@ void __fastcall cps3WriteWord(UINT32 addr, UINT16 data)
 				g = g << 3;
 				b = b << 3;
 
+				UINT32 colournum = (paldma_dest + i) & 0x1ffff;
 #ifdef LSB_FIRST
-				RamPal[(paldma_dest + i) ^ 1] = coldata;
+				RamPal[colournum ^ 1] = coldata;
 #else
-				RamPal[(paldma_dest + i)] = coldata;
+				RamPal[colournum] = coldata;
 #endif
-				Cps3CurPal[(paldma_dest + i) ] = BurnHighCol(r, g, b, 0);
+				Cps3CurPal[colournum] = BurnHighCol(r, g, b, 0);
 			}
 
 			dma_status |= 4;
