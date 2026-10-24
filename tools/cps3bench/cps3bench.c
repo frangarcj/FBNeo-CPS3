@@ -1,9 +1,9 @@
 // Headless libretro runner for benchmarking / regression-checking the CPS3 core.
 //
 //   cps3bench <core.dylib> <rom.zip> [-n frames] [-s sysdir] [-d dumpdir] [-e every] [-q]
-//             [-l] [-o key=value]...
+//             [-l] [-o key=value]... [-w out.wav]
 //
-// -l lists the core options, -o sets one.
+// -l lists the core options, -o sets one, -w writes the audio to a WAV file.
 //
 // Prints emulated FPS and a per-frame CRC32 of the framebuffer every `every` frames,
 // so interpreter and DRC runs can be diffed. With -d, those frames are also dumped as PPM.
@@ -26,6 +26,8 @@ static int cur_frame = 0;
 static uint32_t frame_crc = 0;
 static uint64_t audio_frames = 0;
 static int list_options = 0;
+static FILE *wav = NULL;
+static uint32_t wav_frames = 0;
 
 // core options set with -o key=value
 #define MAX_OPTS 64
@@ -136,8 +138,28 @@ static void video_cb(const void *data, unsigned w, unsigned h, size_t pitch)
 	if (dump_dir) dump_ppm(data, w, h, pitch);
 }
 
-static void audio_cb(int16_t l, int16_t r) { (void)l; (void)r; audio_frames++; }
-static size_t audio_batch_cb(const int16_t *d, size_t frames) { (void)d; audio_frames += frames; return frames; }
+static void audio_cb(int16_t l, int16_t r)
+{
+	int16_t s[2] = { l, r };
+	audio_frames++;
+	if (wav) { fwrite(s, 4, 1, wav); wav_frames++; }
+}
+static size_t audio_batch_cb(const int16_t *d, size_t frames)
+{
+	audio_frames += frames;
+	if (wav) { fwrite(d, 4, frames, wav); wav_frames += frames; }
+	return frames;
+}
+
+static void wav_header(FILE *f, uint32_t rate, uint32_t frames)
+{
+	uint32_t data = frames * 4, riff = 36 + data, fmt = 16, byterate = rate * 4;
+	uint16_t pcm = 1, ch = 2, align = 4, bits = 16;
+	fwrite("RIFF", 1, 4, f); fwrite(&riff, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f);
+	fwrite(&fmt, 4, 1, f); fwrite(&pcm, 2, 1, f); fwrite(&ch, 2, 1, f); fwrite(&rate, 4, 1, f);
+	fwrite(&byterate, 4, 1, f); fwrite(&align, 2, 1, f); fwrite(&bits, 2, 1, f);
+	fwrite("data", 1, 4, f); fwrite(&data, 4, 1, f);
+}
 static void input_poll_cb(void) {}
 static int16_t input_state_cb(unsigned port, unsigned dev, unsigned idx, unsigned id)
 {
@@ -162,6 +184,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-e") && i + 1 < argc) every = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-q")) quiet = 1;
 		else if (!strcmp(argv[i], "-l")) list_options = 1;
+		else if (!strcmp(argv[i], "-w") && i + 1 < argc) wav = fopen(argv[++i], "wb");
 		else if (!strcmp(argv[i], "-o") && i + 1 < argc && opt_count < MAX_OPTS) {
 			char *kv = strdup(argv[++i]), *eq = strchr(kv, '=');
 			if (eq) { *eq = 0; opt_key[opt_count] = kv; opt_val[opt_count++] = eq + 1; }
@@ -202,6 +225,7 @@ int main(int argc, char **argv)
 	struct retro_system_av_info av;
 	p_retro_get_system_av_info(&av);
 	fprintf(stderr, "loaded: %ux%u @ %.3f fps\n", av.geometry.base_width, av.geometry.base_height, av.timing.fps);
+	if (wav) wav_header(wav, (uint32_t)av.timing.sample_rate, 0);
 
 	struct timespec t0, t1;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -210,6 +234,12 @@ int main(int argc, char **argv)
 	double secs = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
 	printf("%d frames in %.3f s -> %.1f fps (%.0f%% of %.2f), audio frames %llu\n", frames, secs, frames / secs,
 	       100.0 * frames / secs / av.timing.fps, av.timing.fps, (unsigned long long)audio_frames);
+
+	if (wav) {
+		fseek(wav, 0, SEEK_SET);
+		wav_header(wav, (uint32_t)av.timing.sample_rate, wav_frames);
+		fclose(wav);
+	}
 
 	p_retro_unload_game();
 	p_retro_deinit();
