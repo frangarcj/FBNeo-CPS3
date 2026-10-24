@@ -74,7 +74,7 @@ static UINT16 Cps3Input[4] = {0, 0, 0, 0};
 
 static ClearOpposite<2, UINT16> clear_opposite;
 
-static UINT32 ss_bank_base = 0;
+static UINT16 ss_vscroll = 0;
 static UINT32 ss_pal_base = 0;
 
 static UINT32 cram_bank = 0;
@@ -643,17 +643,10 @@ void __fastcall cps3WriteByte(UINT32 addr, UINT8 data)
 	
 	switch (addr) {
 	
-	// cps3_ss_bank_base_w
-	case 0x05050020: ss_bank_base = ( ss_bank_base  & 0x00ffffff ) | (data << 24); break;
-	case 0x05050021: ss_bank_base = ( ss_bank_base  & 0xff00ffff ) | (data << 16); break;
-	case 0x05050022: ss_bank_base = ( ss_bank_base  & 0xffff00ff ) | (data <<  8); break;
-	case 0x05050023: ss_bank_base = ( ss_bank_base  & 0xffffff00 ) | (data <<  0); break;
-
-	// cps3_ss_pal_base_w
-	case 0x05050024: ss_pal_base = ( ss_pal_base & 0x00ff ) | (data << 8); break;
-	case 0x05050025: ss_pal_base = ( ss_pal_base & 0xff00 ) | (data << 0); break;
-	case 0x05050026: break;
-	case 0x05050027: break;
+	// SS registers (as in MAME, only bytes 1 and 3 of each long are connected)
+	case 0x05050021: ss_vscroll = (ss_vscroll & 0xff00) | data; break;
+	case 0x05050023: ss_vscroll = (ss_vscroll & 0x00ff) | (data << 8); break;
+	case 0x05050025: ss_pal_base = data; break;
 
 	default:
 		if ((addr >= 0x05050000) && (addr < 0x05060000)) {
@@ -793,12 +786,10 @@ void __fastcall cps3WriteWord(UINT32 addr, UINT16 data)
 		// "0xaa 0x55 0xf0" set flash to normal read
 		break;
 	
-	// cps3_ss_bank_base_w
-	case 0x05050020: ss_bank_base = ( ss_bank_base  & 0x0000ffff ) | (data << 16); break;
-	case 0x05050022: ss_bank_base = ( ss_bank_base  & 0xffff0000 ) | (data <<  0); break;
-
-	// cps3_ss_pal_base_w
-	case 0x05050024: ss_pal_base = data; break;
+	// SS registers (as in MAME, only bytes 1 and 3 of each long are connected)
+	case 0x05050020: ss_vscroll = (ss_vscroll & 0xff00) | (data & 0xff); break;
+	case 0x05050022: ss_vscroll = (ss_vscroll & 0x00ff) | ((data & 0xff) << 8); break;
+	case 0x05050024: ss_pal_base = data & 0xff; break;
 	case 0x05050026: break;
 			
 	case 0x05100000:
@@ -1134,7 +1125,7 @@ static INT32 Cps3Reset()
 		EEPROM[0x29] = 0x000 + (EEPROM[0x29] & 0xff);
 	}
 
-	ss_bank_base = 0;
+	ss_vscroll = 0;
 	ss_pal_base = 0;
 
 	cram_bank = 0;
@@ -1372,116 +1363,28 @@ INT32 cps3Exit()
 }
 
 
-static void cps3_drawgfxzoom_0(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy, INT32 x, INT32 y)
+// SS layer: draw row 'row' of 8x8 tile 'code' at (x, line), clipped to the screen.
+// Only bytes 1 and 3 of each long of SS RAM exist; 4 of them make a tile row.
+static void cps3_draw_ss_tile_row(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy, INT32 x, INT32 line, INT32 row)
 {
-	if ((x > (cps3_gfx_width - 8)) || (y > (cps3_gfx_height - 8))) return;
-	UINT16 * dst = (UINT16 *) pBurnDraw;
-	UINT8 * src = (UINT8 *)RamSS;
-	UINT16 * color = Cps3CurPal + (pal << 4);
-	dst += (y * cps3_gfx_width + x);
-	src += code * 64;
-	
-	if ( flipy ) {
-		dst += cps3_gfx_width * 7;
 #ifdef LSB_FIRST
-		if ( flipx )
-			for(INT32 i=0; i<8; i++, dst-= cps3_gfx_width, src += 8) {
-				if ( src[ 2] & 0xf ) dst[7] = color [ src[ 2] & 0xf ];
-				if ( src[ 2] >>  4 ) dst[6] = color [ src[ 2] >>  4 ];
-				if ( src[ 0] & 0xf ) dst[5] = color [ src[ 0] & 0xf ];
-				if ( src[ 0] >>  4 ) dst[4] = color [ src[ 0] >>  4 ];
-				if ( src[ 6] & 0xf ) dst[3] = color [ src[ 6] & 0xf ];
-				if ( src[ 6] >>  4 ) dst[2] = color [ src[ 6] >>  4 ];
-				if ( src[ 4] & 0xf ) dst[1] = color [ src[ 4] & 0xf ];
-				if ( src[ 4] >>  4 ) dst[0] = color [ src[ 4] >>  4 ];
-			}
-		else
-			for(INT32 i=0; i<8; i++, dst-= cps3_gfx_width, src += 8) {
-				if ( src[ 2] & 0xf ) dst[0] = color [ src[ 2] & 0xf ];
-				if ( src[ 2] >>  4 ) dst[1] = color [ src[ 2] >>  4 ];
-				if ( src[ 0] & 0xf ) dst[2] = color [ src[ 0] & 0xf ];
-				if ( src[ 0] >>  4 ) dst[3] = color [ src[ 0] >>  4 ];
-				if ( src[ 6] & 0xf ) dst[4] = color [ src[ 6] & 0xf ];
-				if ( src[ 6] >>  4 ) dst[5] = color [ src[ 6] >>  4 ];
-				if ( src[ 4] & 0xf ) dst[6] = color [ src[ 4] & 0xf ];
-				if ( src[ 4] >>  4 ) dst[7] = color [ src[ 4] >>  4 ];
-			}
-		
-	} else {
-		if ( flipx )
-			for(INT32 i=0; i<8; i++, dst+= cps3_gfx_width, src += 8) {
-				if ( src[ 2] & 0xf ) dst[7] = color [ src[ 2] & 0xf ];
-				if ( src[ 2] >>  4 ) dst[6] = color [ src[ 2] >>  4 ];
-				if ( src[ 0] & 0xf ) dst[5] = color [ src[ 0] & 0xf ];
-				if ( src[ 0] >>  4 ) dst[4] = color [ src[ 0] >>  4 ];
-				if ( src[ 6] & 0xf ) dst[3] = color [ src[ 6] & 0xf ];
-				if ( src[ 6] >>  4 ) dst[2] = color [ src[ 6] >>  4 ];
-				if ( src[ 4] & 0xf ) dst[1] = color [ src[ 4] & 0xf ];
-				if ( src[ 4] >>  4 ) dst[0] = color [ src[ 4] >>  4 ];
-			}
-		else
-			for(INT32 i=0; i<8; i++, dst+= cps3_gfx_width, src += 8) {
-				if ( src[ 2] & 0xf ) dst[0] = color [ src[ 2] & 0xf ];
-				if ( src[ 2] >>  4 ) dst[1] = color [ src[ 2] >>  4 ];
-				if ( src[ 0] & 0xf ) dst[2] = color [ src[ 0] & 0xf ];
-				if ( src[ 0] >>  4 ) dst[3] = color [ src[ 0] >>  4 ];
-				if ( src[ 6] & 0xf ) dst[4] = color [ src[ 6] & 0xf ];
-				if ( src[ 6] >>  4 ) dst[5] = color [ src[ 6] >>  4 ];
-				if ( src[ 4] & 0xf ) dst[6] = color [ src[ 4] & 0xf ];
-				if ( src[ 4] >>  4 ) dst[7] = color [ src[ 4] >>  4 ];
-			}
-	}
+	static const UINT8 lane[4] = { 2, 0, 6, 4 };
 #else
-		if ( flipx )
-			for(int i=0; i<8; i++, dst-= cps3_gfx_width, src += 8) {
-				if ( src[ 1] & 0xf ) dst[7] = color [ src[ 1] & 0xf ];
-				if ( src[ 1] >>  4 ) dst[6] = color [ src[ 1] >>  4 ];
-				if ( src[ 3] & 0xf ) dst[5] = color [ src[ 3] & 0xf ];
-				if ( src[ 3] >>  4 ) dst[4] = color [ src[ 3] >>  4 ];
-				if ( src[ 5] & 0xf ) dst[3] = color [ src[ 5] & 0xf ];
-				if ( src[ 5] >>  4 ) dst[2] = color [ src[ 5] >>  4 ];
-				if ( src[ 7] & 0xf ) dst[1] = color [ src[ 7] & 0xf ];
-				if ( src[ 7] >>  4 ) dst[0] = color [ src[ 7] >>  4 ];
-			}
-		else
-			for(int i=0; i<8; i++, dst-= cps3_gfx_width, src += 8) {
-				if ( src[ 1] & 0xf ) dst[0] = color [ src[ 1] & 0xf ];
-				if ( src[ 1] >>  4 ) dst[1] = color [ src[ 1] >>  4 ];
-				if ( src[ 3] & 0xf ) dst[2] = color [ src[ 3] & 0xf ];
-				if ( src[ 3] >>  4 ) dst[3] = color [ src[ 3] >>  4 ];
-				if ( src[ 5] & 0xf ) dst[4] = color [ src[ 5] & 0xf ];
-				if ( src[ 5] >>  4 ) dst[5] = color [ src[ 5] >>  4 ];
-				if ( src[ 7] & 0xf ) dst[6] = color [ src[ 7] & 0xf ];
-				if ( src[ 7] >>  4 ) dst[7] = color [ src[ 7] >>  4 ];
-			}
-
-	} else {
-		if ( flipx )
-			for(int i=0; i<8; i++, dst+= cps3_gfx_width, src += 8) {
-				if ( src[ 1] & 0xf ) dst[7] = color [ src[ 1] & 0xf ];
-				if ( src[ 1] >>  4 ) dst[6] = color [ src[ 1] >>  4 ];
-				if ( src[ 3] & 0xf ) dst[5] = color [ src[ 3] & 0xf ];
-				if ( src[ 3] >>  4 ) dst[4] = color [ src[ 3] >>  4 ];
-				if ( src[ 5] & 0xf ) dst[3] = color [ src[ 5] & 0xf ];
-				if ( src[ 5] >>  4 ) dst[2] = color [ src[ 5] >>  4 ];
-				if ( src[ 7] & 0xf ) dst[1] = color [ src[ 7] & 0xf ];
-				if ( src[ 7] >>  4 ) dst[0] = color [ src[ 7] >>  4 ];
-			}
-		else
-			for(int i=0; i<8; i++, dst+= cps3_gfx_width, src += 8) {
-				if ( src[ 1 ] & 0xf ) dst[0] = color [ src[ 1 ] & 0xf ];
-				if ( src[ 1 ] >>  4 ) dst[1] = color [ src[ 1 ] >>  4 ];
-				if ( src[ 3 ] & 0xf ) dst[2] = color [ src[ 3 ] & 0xf ];
-				if ( src[ 3 ] >>  4 ) dst[3] = color [ src[ 3 ] >>  4 ];
-				if ( src[ 5 ] & 0xf ) dst[4] = color [ src[ 5 ] & 0xf ];
-				if ( src[ 5 ] >>  4 ) dst[5] = color [ src[ 5 ] >>  4 ];
-				if ( src[ 7 ] & 0xf ) dst[6] = color [ src[ 7 ] & 0xf ];
-				if ( src[ 7 ] >>  4 ) dst[7] = color [ src[ 7 ] >>  4 ];
-			}
-	}
-
+	static const UINT8 lane[4] = { 1, 3, 5, 7 };
 #endif
-	
+	if (x <= -8 || x >= cps3_gfx_width) return;
+
+	UINT8 *src = (UINT8 *)RamSS + code * 64 + (flipy ? 7 - row : row) * 8;
+	UINT16 *dst = (UINT16 *)pBurnDraw + line * cps3_gfx_width;
+	UINT16 *color = Cps3CurPal + (pal << 4);
+
+	for (INT32 i = 0; i < 8; i++) {
+		INT32 px = x + (flipx ? 7 - i : i);
+		UINT8 c = src[lane[i >> 1]];
+		c = (i & 1) ? (c >> 4) : (c & 0xf);
+		if (c && px >= 0 && px < cps3_gfx_width)
+			dst[px] = color[c];
+	}
 }
 
 static void cps3_drawgfxzoom_1(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy, INT32 x, INT32 y, INT32 drawline)
@@ -1757,93 +1660,105 @@ static void cps3_drawgfxzoom_2(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy
 	}
 }
 
+// one line of a 16x16 tile, alpha blended (shadows, highlights) as in MAME
+static void cps3_draw_tile_line_blend(UINT32 code, UINT32 pal, INT32 flipx, INT32 flipy, INT32 x, INT32 y, INT32 drawline, INT32 bpp6)
+{
+	UINT32 *dst = RamScreen + drawline * 1024;
+	UINT8 *src = (UINT8 *)RamCRam + code * 256 + 16 * (flipy ? 15 - (drawline - y) : (drawline - y));
+
+	for (INT32 i = 0; i < 16; i++) {
+		INT32 px = x + (flipx ? 15 - i : i);
+#if BE_GFX_CRAM
+		UINT8 c = src[i];
+#else
+		UINT8 c = src[i ^ 3];
+#endif
+		if (c && px >= 0 && px <= cps3_gfx_max_x) {
+			if (bpp6)
+				dst[px] |= (c & 0xf) << 13;
+			else
+				dst[px] |= ((c & 1) << 15) | ((pal & 1) << 16);
+		}
+	}
+}
+
 static void cps3_draw_tilemapsprite_line(INT32 drawline, UINT32 * regs )
 {
-	INT32 scrolly =  ((regs[0]&0x0000ffff)>>0)+4;
-	INT32 line = drawline + scrolly;
-	line &= 0x3ff;
-
 	if (!(regs[1]&0x00008000)) return;
 
-	{
-		UINT32 mapbase =  (regs[2]&0x007f0000)>>16;
-		UINT32 linebase=  (regs[2]&0x7f000000)>>24;
-		INT32 linescroll_enable = (regs[1]&0x00004000);
+	INT32 scrolly =  ((regs[0]&0x0000ffff)>>0)+4;
+	INT32 line = (drawline + scrolly) & 0x3ff;
 
-		INT32 scrollx;
-		INT32 tileline = (line/16)+1;
-		INT32 tilesubline = line % 16;
+	UINT32 mapbase =  (regs[2]&0x007f0000)>>16;
+	UINT32 linebase=  (regs[2]&0x7f000000)>>24;
+	INT32 linescroll_enable = (regs[1]&0x00004000);
+	INT32 global_flip_x = (regs[1] & 0x00000800); // warzard special moves
+	INT32 global_flip_y = (regs[1] & 0x00000400); // sfiii2 loading screens
 
-		mapbase = mapbase << 10;
-		linebase = linebase << 10;
+	if (global_flip_y) line ^= 0x3ff;
+	INT32 xflip_mask = global_flip_x ? 0x3f : 0;
 
-		if (!linescroll_enable)	{
-			scrollx =  (regs[0]&0xffff0000)>>16;
-		} else {
-			scrollx =  (regs[0]&0xffff0000)>>16;
-			scrollx+= (RamSpr[linebase+((line+16)&0x3ff)]>>16)&0x3ff; // test case: sfiii Ryu's stage 2nd round floor
+	INT32 scrollx;
+	INT32 tileline = (line/16)+1;
+	INT32 tilesubline = line % 16;
+
+	mapbase = mapbase << 10;
+	linebase = linebase << 10;
+
+	scrollx =  (regs[0]&0xffff0000)>>16;
+	if (linescroll_enable)
+		scrollx+= (RamSpr[linebase+((line+16)&0x3ff)]>>16)&0x3ff; // test case: sfiii Ryu's stage 2nd round floor
+
+	for (INT32 x=0;x<(cps3_gfx_max_x/16)+2;x++) {
+		UINT32 dat = RamSpr[mapbase+((tileline&63)*64)+(((x+scrollx/16)&63) ^ xflip_mask)];
+		INT32 tileno = (dat & 0xfffe0000)>>17;
+		INT32 colour = (dat & 0x000001ff)>>0;
+		INT32 bpp =    (dat & 0x00000200)>>9;
+		INT32 alpha =  (dat & 0x00000400)>>10; // jojo's "country town" and "in air plane" stages
+		INT32 yflip  = (dat & 0x00000800)>>11;
+		INT32 xflip  = ((dat & 0x00001000)>>12) ^ (xflip_mask & 1);
+
+		if (alpha) {
+			cps3_draw_tile_line_blend(tileno,colour,xflip,yflip,(x*16)-scrollx%16,drawline-tilesubline, drawline, bpp);
+			continue;
 		}
 
-		if (drawline>cps3_gfx_max_y+4) return;
+		if (!bpp) colour <<= 8;
+		else colour <<= 6;
 
-		for (INT32 x=0;x<(cps3_gfx_max_x/16)+2;x++) {
-
-			UINT32 dat;
-			INT32 tileno;
-			INT32 colour;
-			INT32 bpp;
-			INT32 xflip,yflip;
-
-			dat = RamSpr[mapbase+((tileline&63)*64)+((x+scrollx/16)&63)];
-			tileno = (dat & 0xfffe0000)>>17;
-			colour = (dat & 0x000001ff)>>0;
-			bpp =    (dat & 0x00000200)>>9;
-			yflip  = (dat & 0x00000800)>>11;
-			xflip  = (dat & 0x00001000)>>12;
-
-			if (!bpp) colour <<= 8;
-			else colour <<= 6;
-
-			cps3_drawgfxzoom_1(tileno,colour,xflip,yflip,(x*16)-scrollx%16,drawline-tilesubline, drawline);
-		}
+		cps3_drawgfxzoom_1(tileno,colour,xflip,yflip,(x*16)-scrollx%16,drawline-tilesubline, drawline);
 	}
 }
 
 INT32 DrvCps3Draw()
 {
-	UINT32 fullscreenzoom = RamVReg[ 6 * 4 + 3 ] & 0xff;
-	UINT32 fullscreenzoomwidecheck = RamVReg[6 * 4 + 1];
+	UINT32 *crtc = RamVReg + 0x60 / 4;
 
 	BurnDrvGetVisibleSize(&cps3_gfx_width, &cps3_gfx_height);
 
-	if (((fullscreenzoomwidecheck & 0xffff0000) >> 16) == 0x0265 || strcmp(BurnDrvGetTextA(DRV_NAME), "sfiii3ws") == 0)
-	{
-		INT32 Width, Height;
-		BurnDrvGetVisibleSize(&Width, &Height);
-		
-		if (Width != 496) {
-			BurnDrvSetVisibleSize(496, 224);
-			BurnDrvSetAspect(16, 9);
-			ReinitialiseVideo();
-			return 1;
-		}
-	} else {
-		INT32 Width, Height;
-		BurnDrvGetVisibleSize(&Width, &Height);
-		
-		if (Width != 384) {
-			BurnDrvSetVisibleSize(384, 224);
-			BurnDrvSetAspect(4, 3);
-			ReinitialiseVideo();
-			return 1;
-		}
+	// screen width as set in the CRTC (384, or 496 for the wide modes), as in MAME
+	INT32 width = ((crtc[1] & 0xffff0000) >> 16) - (crtc[0] & 0xffff);
+	if (strcmp(BurnDrvGetTextA(DRV_NAME), "sfiii3ws") == 0) width = 496; // hack set
+	if (width <= 0 || width > 512) width = cps3_gfx_width;
+
+	if (cps3_gfx_width != width) {
+		BurnDrvSetVisibleSize(width, 224);
+		if (width == 496) BurnDrvSetAspect(16, 9);
+		else BurnDrvSetAspect(4, 3);
+		ReinitialiseVideo();
+		return 1;
 	}
-	
-	if (fullscreenzoom > 0x80) fullscreenzoom = 0x80;
-	UINT32 fsz = (fullscreenzoom << (16 - 6));
-	
-	cps3_gfx_max_x = ((cps3_gfx_width * fsz)  >> 16) - 1;	// 384 ( 496 for SFIII2 Only)
-	cps3_gfx_max_y = ((cps3_gfx_height * fsz) >> 16) - 1;	// 224
+
+	// full screen zoom, 0x40 = 1:1
+	UINT32 fullscreenzoomx = crtc[3] & 0xff;
+	UINT32 fullscreenzoomy = crtc[7] & 0xff;
+	if (fullscreenzoomx > 0x80) fullscreenzoomx = 0x80;
+	if (fullscreenzoomy > 0x80) fullscreenzoomy = 0x80;
+	UINT32 fszx = (fullscreenzoomx << 16) / 0x40;
+	UINT32 fszy = (fullscreenzoomy << 16) / 0x40;
+
+	cps3_gfx_max_x = ((cps3_gfx_width  * fszx + 0x8000) >> 16) - 1;
+	cps3_gfx_max_y = ((cps3_gfx_height * fszy + 0x8000) >> 16) - 1;
 
 	if (nBurnLayer & 1)
 	{
@@ -1926,14 +1841,14 @@ INT32 DrvCps3Draw()
 						INT32 tilemapnum = ((value3 & 0x00000030)>>4);
 						UINT32 * regs = RamVReg + 8 + tilemapnum * 4;
 
-						for (yy = 0; yy <= ysizedraw2; yy++)
+						for (yy = 0; yy < ysizedraw2; yy++)
 						{
 							INT32 cury_pos = ypos2 + gscrolly - yy;
 							cury_pos = ~cury_pos;
 							cury_pos -= 18;
 							cury_pos &= 0x3ff;
 
-							if (cury_pos >= 0 && cury_pos <= cps3_gfx_max_y+1)
+							if (cury_pos >= 0 && cury_pos <= cps3_gfx_max_y)
 								cps3_draw_tilemapsprite_line(cury_pos, regs);
 						}
 					}
@@ -2026,43 +1941,35 @@ INT32 DrvCps3Draw()
 			srcx=0;
 			for (INT32 renderx=0; renderx<cps3_gfx_width; renderx++, dstbitmap ++) {
 				*dstbitmap = Cps3CurPal[ srcbitmap[srcx>>16] ];
-				srcx += fsz;
+				srcx += fszx;
 			}
-			srcy += fsz;
+			srcy += fszy;
 		}
 	}
 	
 	if (nBurnLayer & 2)
 	{
-		// bank select? (sfiii2 intro)
-		INT32 bank = (ss_bank_base & 0x01000000) ? 0x0000 : 0x0800;
+		// SS layer, as in MAME. The vertical scroll only selects the page
+		// (sfiii2 intro), rowscroll is used by the 'combo meter' in JoJo games.
+		INT32 scrolly = (-ss_vscroll) & 0x100;
 
-		INT32 prev_rowscroll = 0;
+		for (INT32 line = 0; line < cps3_gfx_height; line++) {
+			INT32 offset = (((line + scrolly) / 8) * 64) & 0xfff;
+			INT32 rowscroll = (RamSS[0x4000 / 4 + ((line + scrolly - 1) & 0x1ff)] >> 16) & 0xff;
 
-		for (INT32 line = 0; line < 224; line++) {
-			INT32 y = line / 8;
-			INT32 count = (y * 64) + bank;
-			// 'combo meter' in JoJo games uses rowscroll
-			INT32 rowscroll = RamSS[((line - 1) & 0x1ff) + 0x4000 / 4] >> 16;
-			// if neither rowscroll nor count are varying from previous loop, skipping directly to next loop should be fine
-			if (rowscroll == prev_rowscroll && (y*8 != line)) continue;
-			prev_rowscroll = rowscroll;
+			for (INT32 x = 0; x < 64; x++, offset++) {
+				UINT32 data = RamSS[offset];
+				data = ((data >> 16) & 0xff) | ((data & 0xff) << 8);
+				UINT32 tile = data & 0x1ff;
+				if (tile == 0) continue; // empty
 
-			for (INT32 x = 0; x < 64; x++, count++) {
-				UINT32 data = RamSS[count]; // +0x800 = 2nd bank, used on sfiii2 intro..
-				UINT32 tile = (data >> 16) & 0x1ff;
-				INT32 pal = (data & 0x003f) >> 1;
-				INT32 flipx = data & 0x0080;
-				INT32 flipy = data & 0x0040;
-				pal += ss_pal_base << 5;
+				INT32 pal = ((data & 0x3e00) >> 9) + (ss_pal_base << 5);
+				INT32 flipy = data & 0x4000;
+				INT32 flipx = data & 0x8000;
+				INT32 sx = (x * 8) - rowscroll;
 
-				if (tile == 0) continue; // ok?
-
-				tile+=0x200;
-
-				INT32 effx = (x*8)-rowscroll;
-				if (effx < -7 || effx > cps3_gfx_width) continue;
-				cps3_drawgfxzoom_0(tile,pal,flipx,flipy,effx,y*8);
+				cps3_draw_ss_tile_row(tile + 0x200, pal, flipx, flipy, sx, line, line & 7);
+				cps3_draw_ss_tile_row(tile + 0x200, pal, flipx, flipy, sx + 512, line, line & 7);
 			}
 		}
 	}
@@ -2271,7 +2178,7 @@ INT32 cps3Scan(INT32 nAction, INT32 *pnMin)
 		Sh2Scan(nAction);
 		cps3SndScan(nAction);
 
-		SCAN_VAR(ss_bank_base);
+		SCAN_VAR(ss_vscroll);
 		SCAN_VAR(ss_pal_base);
 		SCAN_VAR(cram_bank);
 		SCAN_VAR(cps3_current_eeprom_read);
