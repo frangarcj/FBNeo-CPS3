@@ -35,6 +35,7 @@ rm -f "$ra/retroarch_vita.self" "$ra/retroarch_vita.elf"
 make -s -C "$ra" -f Makefile.vita VITA_AUTOLOAD_CONTENT=1 -j6 > "$build/ra.log" 2>&1 \
 	|| { tail -20 "$build/ra.log"; exit 1; }
 
+echo "nosleep on" | nc -w 3 "$vita" 1338 > /dev/null	# don't let it sleep while we watch
 echo destroy | nc -w 3 "$vita" 1338 > /dev/null
 curl -s --max-time 600 -T "$ra/retroarch_vita.self" "ftp://$vita:1337/ux0:/app/RETROARCH/fbneo_cps3_libretro.self"
 

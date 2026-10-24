@@ -1840,13 +1840,8 @@ INT32 DrvCps3Draw()
 		// no zoom: also clear the buffer for the next frame on the way
 		UINT16 * dstbitmap = (UINT16 * )pBurnDraw;
 
-		for (INT32 rendery = 0; rendery < cps3_gfx_height; rendery++, dstbitmap += cps3_gfx_width) {
-			UINT32 * srcbitmap = RamScreen + rendery * 1024;
-			for (INT32 renderx = 0; renderx < cps3_gfx_width; renderx++) {
-				dstbitmap[renderx] = Cps3CurPal[ srcbitmap[renderx] ];
-				srcbitmap[renderx] = 0;
-			}
-		}
+		for (INT32 rendery = 0; rendery < cps3_gfx_height; rendery++, dstbitmap += cps3_gfx_width)
+			cps3_copy_line(dstbitmap, RamScreen + rendery * 1024, cps3_gfx_width, Cps3CurPal);
 		cps3_screen_clean_w = cps3_gfx_width;
 		cps3_screen_clean_h = cps3_gfx_height;
 	}

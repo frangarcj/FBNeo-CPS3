@@ -85,4 +85,27 @@ static inline void cps3_line16(UINT32 *dst, const UINT8 *src, UINT32 pal, INT32 
 #endif
 }
 
+// One line of the render buffer through the palette to the output, clearing
+// the render buffer for the next frame. Eight pixels at a time so the palette
+// reads don't wait on each other.
+static inline void cps3_copy_line(UINT16 *dst, UINT32 *src, INT32 n, const UINT16 *pal)
+{
+	INT32 i = 0;
+	for (; i + 8 <= n; i += 8) {
+#if defined(__GNUC__)
+		__builtin_prefetch(src + i + 64);
+#endif
+		UINT32 s0 = src[i + 0], s1 = src[i + 1], s2 = src[i + 2], s3 = src[i + 3];
+		UINT32 s4 = src[i + 4], s5 = src[i + 5], s6 = src[i + 6], s7 = src[i + 7];
+		UINT16 c0 = pal[s0], c1 = pal[s1], c2 = pal[s2], c3 = pal[s3];
+		UINT16 c4 = pal[s4], c5 = pal[s5], c6 = pal[s6], c7 = pal[s7];
+		dst[i + 0] = c0; dst[i + 1] = c1; dst[i + 2] = c2; dst[i + 3] = c3;
+		dst[i + 4] = c4; dst[i + 5] = c5; dst[i + 6] = c6; dst[i + 7] = c7;
+	}
+	for (; i < n; i++)
+		dst[i] = pal[src[i]];
+
+	memset(src, 0, n * sizeof(UINT32));
+}
+
 #endif // CPS3_SIMD_H
