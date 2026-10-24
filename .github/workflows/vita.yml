@@ -32,7 +32,7 @@ jobs:
       retroarch: ${{ steps.retroarch.outputs.tag }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
     - name: RetroArch version
       id: retroarch
@@ -56,7 +56,7 @@ jobs:
         cp src/burner/libretro/fbneo_cps3_libretro_vita.a retroarch/libretro_vita.a
         make -C retroarch -f Makefile.vita -j$(getconf _NPROCESSORS_ONLN) retroarch_vita.self
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: retroarch-vita
         path: |
@@ -70,9 +70,9 @@ jobs:
       contents: write
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
         name: retroarch-vita
         path: retroarch
@@ -83,7 +83,7 @@ jobs:
         SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
       run: dist/vita/package.sh retroarch fbneo_cps3_vita.zip
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: fbneo_cps3_vita
         path: fbneo_cps3_vita.zip
