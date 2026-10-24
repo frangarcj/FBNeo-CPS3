@@ -1935,8 +1935,10 @@ INT32 DrvCps3Draw()
 			INT32 offset = (((line + scrolly) / 8) * 64) & 0xfff;
 			INT32 rowscroll = (RamSS[0x4000 / 4 + ((line + scrolly - 1) & 0x1ff)] >> 16) & 0xff;
 
-			for (INT32 x = 0; x < 64; x++, offset++) {
-				UINT32 data = RamSS[offset];
+			// the layer is 512 pixels wide and wraps, only visit the visible columns
+			for (INT32 col = 0; col <= cps3_gfx_width / 8; col++) {
+				INT32 x = (col + rowscroll / 8) & 63;
+				UINT32 data = RamSS[offset + x];
 				data = ((data >> 16) & 0xff) | ((data & 0xff) << 8);
 				UINT32 tile = data & 0x1ff;
 				if (tile == 0) continue; // empty
@@ -1944,10 +1946,9 @@ INT32 DrvCps3Draw()
 				INT32 pal = ((data & 0x3e00) >> 9) + (ss_pal_base << 5);
 				INT32 flipy = data & 0x4000;
 				INT32 flipx = data & 0x8000;
-				INT32 sx = (x * 8) - rowscroll;
+				INT32 sx = (col * 8) - (rowscroll & 7);
 
 				cps3_draw_ss_tile_row(tile + 0x200, pal, flipx, flipy, sx, line, line & 7);
-				cps3_draw_ss_tile_row(tile + 0x200, pal, flipx, flipy, sx + 512, line, line & 7);
 			}
 		}
 	}
