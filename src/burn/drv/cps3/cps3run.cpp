@@ -1033,7 +1033,8 @@ void __fastcall cps3VidWriteLong(UINT32 addr, UINT32 data)
 // Speedup: the SH2 is idle when its task dispatcher looks at the state of this
 // task, skip to the end of the current slice of the frame. (Not until the next
 // irq: the dispatcher runs with irqs masked, boot would only get on once per
-// frame.) Checked right before the dispatcher's mov.x @Rm,Rn that reads it.
+// frame.) Checked right before the dispatcher's mov.x @Rm,Rn that reads it,
+// or before the branch whose delay slot it is.
 static INT32 cps3_slice_end = 0;
 static INT32 cps3_speedup_reg = 0;
 
@@ -1046,23 +1047,52 @@ static void cps3_speedup_check()
 	}
 }
 
+static UINT16 cps3_program_op(UINT32 pc)
+{
+#ifdef LSB_FIRST
+	return *(UINT16 *)(cps3_game_flash_data() + ((pc & 0x00ffffff) ^ 2));
+#else
+	return *(UINT16 *)(cps3_game_flash_data() + (pc & 0x00ffffff));
+#endif
+}
+
+// Rm of mov.b/w/l @Rm,Rn or @Rm+,Rn, else -1
+static INT32 cps3_read_op_reg(UINT16 op)
+{
+	if ((op & 0xf000) != 0x6000 || (op & 0xf) > 6 || (op & 0xf) == 3) return -1;
+	return (op >> 4) & 0x0f;
+}
+
 static void cps3_install_speedup()
 {
-	UINT32 pc = cps3_speedup_code_address - 2; // the address is the pc after the read
-	if ((pc & 0xff000000) != 0x06000000) return;
+	UINT32 code = cps3_speedup_code_address; // the pc after the read
+	if ((code & 0xff000000) != 0x06000000) return;
 
-#ifdef LSB_FIRST
-	UINT16 op = *(UINT16 *)(RomGame_D + ((pc & 0x00ffffff) ^ 2));
-#else
-	UINT16 op = *(UINT16 *)(RomGame_D + (pc & 0x00ffffff));
-#endif
-	// mov.b/w/l @Rm,Rn or @Rm+,Rn
-	if ((op & 0xf000) != 0x6000 || (op & 0xf) > 6 || (op & 0xf) == 3) {
-		bprintf(PRINT_ERROR, _T("CPS3: unexpected opcode %04x at speedup address %08x\n"), op, pc);
+	UINT32 pc = code - 2;
+	INT32 reg = cps3_read_op_reg(cps3_program_op(pc));
+
+	if (reg < 0) {
+		// the read is in the delay slot of a bra to that address (redearth):
+		// check before the bra, Rm is already set there
+		for (UINT32 a = code - 0x1000; a < code + 0x1000; a += 2) {
+			UINT16 op = cps3_program_op(a);
+			if ((op & 0xf000) != 0xa000) continue;
+			INT32 disp = (op & 0x800) ? (INT32)(op & 0xfff) - 0x1000 : (op & 0xfff);
+			if (a + 4 + disp * 2 != code) continue;
+			reg = cps3_read_op_reg(cps3_program_op(a + 2));
+			if (reg >= 0) {
+				pc = a;
+				break;
+			}
+		}
+	}
+
+	if (reg < 0) {
+		bprintf(PRINT_ERROR, _T("CPS3: no read found for speedup address %08x\n"), code);
 		return;
 	}
 
-	cps3_speedup_reg = (op >> 4) & 0x0f;
+	cps3_speedup_reg = reg;
 	Sh2SetIdleHook(pc, cps3_speedup_check);
 }
 
