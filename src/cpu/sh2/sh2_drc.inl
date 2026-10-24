@@ -136,6 +136,20 @@ extern "C" int plat_mem_set_exec(void *ptr, size_t size)
 }
 
 // ---------------------------------------------------------------------------
+// SR access
+//
+// With gcc on ARM the translated code keeps SR in a global register (r10, see
+// DRC_SR_REG), which is only reserved in this file. Memory handlers save it to
+// the context before calling a driver handler: other code may then use r10,
+// so functions it calls back (Sh2TotalCycles(), Sh2StopRun(), irq changes...)
+// must work on the saved copy. Called from translated code they use r10.
+
+static INT32 drc_sr_saved;
+
+#define DRC_SR_ENTER()	if (!drc_sr_saved) { DRC_SAVE_SR(drc); }
+#define DRC_SR_LEAVE()	if (!drc_sr_saved) { DRC_RESTORE_SR(drc); }
+
+// ---------------------------------------------------------------------------
 // cycles and timeslices
 
 // SR bits 12-31 hold the cycles left in the timeslice, minus one
@@ -153,7 +167,7 @@ static inline void drc_sync_icount()
 // cycles run so far in the current timeslice
 static INT32 Sh2DrcCyclesDone()
 {
-	DRC_SAVE_SR(drc);
+	DRC_SR_ENTER();
 	return (INT32)drc->cycles_timeslice - drc_cycles_left();
 }
 
@@ -175,9 +189,9 @@ static void Sh2DrcEndRun()
 	if (!drc_in_run)
 		return;
 
-	DRC_SAVE_SR(drc);
+	DRC_SR_ENTER();
 	drc_end_timeslice(0);
-	DRC_RESTORE_SR(drc);
+	DRC_SR_LEAVE();
 }
 
 // ---------------------------------------------------------------------------
@@ -204,10 +218,10 @@ static void Sh2DrcIrqChanged()
 	drc->pending_level = drc_pending_level();
 
 	if (drc_in_run) {
-		DRC_SAVE_SR(drc);
+		DRC_SR_ENTER();
 		if (drc->pending_level > (INT32)((drc->sr >> 4) & 0x0f))
 			drc_end_timeslice(0);
-		DRC_RESTORE_SR(drc);
+		DRC_SR_LEAVE();
 	}
 }
 
@@ -241,7 +255,9 @@ static inline unsigned char *drc_page(UINT32 a, INT32 map)
 #define DRC_HANDLER_CALL(call)			\
 	DRC_SAVE_SR(drc);					\
 	drc_sync_icount();					\
+	drc_sr_saved = 1;					\
 	call;								\
+	drc_sr_saved = 0;					\
 	DRC_RESTORE_SR(drc);
 
 extern "C" u32 REGPARM(2) p32x_sh2_read8(u32 a, SH2_DRC *)
