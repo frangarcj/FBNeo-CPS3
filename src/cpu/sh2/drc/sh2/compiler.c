@@ -89,11 +89,20 @@ static int insns_compiled, hash_collisions, host_insn_count;
 
 
 ///
+#if DRC_MEM_32LE
+// FBNeo: memory is stored as host-endian 32 bit words
+#define FETCH_OP(pc) \
+  dr_pc_base[((pc) ^ 2) / 2]
+
+#define FETCH32(a) \
+  ((dr_pc_base[((a) ^ 2) / 2] << 16) | dr_pc_base[(((a) + 2) ^ 2) / 2])
+#else
 #define FETCH_OP(pc) \
   dr_pc_base[(pc) / 2]
 
 #define FETCH32(a) \
   ((dr_pc_base[(a) / 2] << 16) | dr_pc_base[(a) / 2 + 1])
+#endif
 
 #define CHECK_UNHANDLED_BITS(mask, label) { \
   if ((op & (mask)) != 0) \
@@ -390,7 +399,12 @@ static struct block_link **unresolved_links[TCACHE_BUFFERS];
 static struct block_link *blink_free[TCACHE_BUFFERS];
 
 // used for invalidation
-#define RAM_SIZE(tcid) 			((tcid) ? 0x1000 : 0x40000)
+#ifndef DRC_SDRAM_BASE // 32X SDRAM
+#define DRC_SDRAM_BASE			0x06000000
+#define DRC_SDRAM_AMASK			0xc7fc0000
+#define DRC_SDRAM_SIZE			0x40000
+#endif
+#define RAM_SIZE(tcid) 			((tcid) ? 0x1000 : DRC_SDRAM_SIZE)
 #define INVAL_PAGE_SIZE 0x100
 
 static struct block_list *inactive_blocks[TCACHE_BUFFERS];
@@ -811,6 +825,7 @@ static void dr_block_link(struct block_entry *be, struct block_link *bl, int emi
   if (emit_jump) {
     u8 *jump = bl->jump;
     int jsz = emith_jump_patch_size();
+    drc_jit_write_begin();
     if (bl->type == BL_JMP) { // patch: jump @entry
       // inlined: @jump far jump to target
       emith_jump_patch(jump, be->tcache_ptr, &jump);
@@ -834,6 +849,7 @@ static void dr_block_link(struct block_entry *be, struct block_link *bl, int emi
       exit(1);
     }
     host_instructions_updated(jump, jump + jsz, ((uintptr_t)jump & 0x1f) + jsz-1 > 0x1f);
+    drc_jit_write_end();
   }
 
   // move bl to block_entry
@@ -853,6 +869,7 @@ static void dr_block_unlink(struct block_link *bl, int emit_jump)
     if (emit_jump) {
       u8 *jump = bl->jump;
       int jsz = emith_jump_patch_size();
+      drc_jit_write_begin();
       if (bl->type == BL_JMP) { // jump_patch @dispatcher
         // inlined: @jump far jump to dispatcher
         emith_jump_patch(jump, sh2_drc_dispatcher, &jump);
@@ -871,6 +888,7 @@ static void dr_block_unlink(struct block_link *bl, int emit_jump)
       }
       // update cpu caches since the previous jump target doesn't exist anymore
       host_instructions_updated(jump, jump + jsz, 1);
+      drc_jit_write_end();
     }
 
     if (bl->prev)
@@ -929,7 +947,7 @@ static void dr_mark_memory(int mark, struct block_desc *block, int tcache_id, u3
   u32 addr, end, mask = 0, shift = 0, idx;
 
   // mark memory blocks as containing compiled code
-  if ((block->addr & 0xc7fc0000) == 0x06000000
+  if ((block->addr & DRC_SDRAM_AMASK) == DRC_SDRAM_BASE
       || (block->addr & 0xfffff000) == 0xc0000000)
   {
     if (tcache_id != 0) {
@@ -967,6 +985,10 @@ static void dr_mark_memory(int mark, struct block_desc *block, int tcache_id, u3
         lit_ram_blk[idx++] = 1;
     }
 
+#if DRC_COUNT_MARKED_BLOCKS
+    // FBNeo: lets the memory handlers skip the overwrite check if there's no code
+    Pico32xMem->marked_blocks += mark;
+#endif
     if (mark < 0)
       rm_from_block_lists(block);
     else {
@@ -990,7 +1012,7 @@ static u32 dr_check_nolit(u32 start, u32 end, int tcache_id)
   u8 *lit_ram_blk = NULL;
   u32 mask = 0, shift = 0, addr, idx;
 
-  if ((start & 0xc7fc0000) == 0x06000000
+  if ((start & DRC_SDRAM_AMASK) == DRC_SDRAM_BASE
       || (start & 0xfffff000) == 0xc0000000)
   {
     if (tcache_id != 0) {
@@ -2581,10 +2603,25 @@ static void rcache_init(void)
 
 // ---------------------------------------------------------------
 
+#if DRC_MEM_32LE && CPU_IS_LE
+// FBNeo: addr/offs of u8 and u16 in a host-endian u32
+#define DRC_MEM_8(a)  ((a) ^ 3)
+#define DRC_MEM_16(a) ((a) ^ 2)
+#define DRC_MEM_XOR8  3
+#elif DRC_MEM_32LE
+#define DRC_MEM_8(a)  (a)
+#define DRC_MEM_16(a) (a)
+#define DRC_MEM_XOR8  0
+#else
+#define DRC_MEM_8(a)  MEM_BE2(a)
+#define DRC_MEM_16(a) (a)
+#define DRC_MEM_XOR8  1
+#endif
+
 // swap 32 bit value read from mem in generated code (same as CPU_BE2)
 static void emit_le_swap(int cond, int r)
 {
-#if CPU_IS_LE
+#if CPU_IS_LE && !DRC_MEM_32LE
   if (cond == -1)
     emith_ror(r, r, 16);
   else
@@ -2597,9 +2634,20 @@ static void emit_le_ptr8(int cond, int r)
 {
 #if CPU_IS_LE
   if (cond == -1)
-    emith_eor_r_imm_ptr(r, 1);
+    emith_eor_r_imm_ptr(r, DRC_MEM_XOR8);
   else
-    emith_eor_r_imm_ptr_c(cond, r, 1);
+    emith_eor_r_imm_ptr_c(cond, r, DRC_MEM_XOR8);
+#endif
+}
+
+// fix memory word ptr in generated code
+static void emit_le_ptr16(int cond, int r)
+{
+#if CPU_IS_LE && DRC_MEM_32LE
+  if (cond == -1)
+    emith_eor_r_imm_ptr(r, 2);
+  else
+    emith_eor_r_imm_ptr_c(cond, r, 2);
 #endif
 }
 
@@ -2661,8 +2709,11 @@ static int emit_get_rbase_and_offs(SH2 *sh2, sh2_reg_e r, int rmode, s32 *offs)
 
   // if r is in rcache or needed soon anyway, and offs is relative to region,
   // and address translation fits in add_ptr_imm (s32), then use rcached const 
-  if (la == (s32)la && !(((a & mask) + *offs) & ~mask) && rcache_is_cached(r)) {
-#if CPU_IS_LE // need to fix odd address for correct byte addressing
+  // FBNeo: with 32 bit words the u8/u16 offset fixup is only valid if the
+  // register value is word aligned, else use the absolute address below
+  if (la == (s32)la && !(((a & mask) + *offs) & ~mask) && rcache_is_cached(r)
+      && !(DRC_MEM_32LE && (a & 3))) {
+#if CPU_IS_LE && !DRC_MEM_32LE // need to fix odd address for correct byte addressing
     if (a & 1) *offs += (*offs&1) ? 2 : -2;
 #endif
     la -= (s32)((a & ~mask) - *offs); // diff between reg and memory
@@ -2851,8 +2902,8 @@ static int emit_memhandler_read_rr(SH2 *sh2, sh2_reg_e rd, sh2_reg_e rs, s32 off
     else
       hr2 = rcache_get_reg(rd, RC_GR_WRITE, NULL);
     switch (size & MF_SIZEMASK) {
-    case 0: emith_read8s_r_r_offs(hr2, hr, MEM_BE2(offs));  break; // 8
-    case 1: emith_read16s_r_r_offs(hr2, hr, offs);          break; // 16
+    case 0: emith_read8s_r_r_offs(hr2, hr, DRC_MEM_8(offs));  break; // 8
+    case 1: emith_read16s_r_r_offs(hr2, hr, DRC_MEM_16(offs)); break; // 16
     case 2: emith_read_r_r_offs(hr2, hr, offs); emit_le_swap(-1, hr2); break;
     }
     rcache_free(hr);
@@ -3256,7 +3307,20 @@ static void emit_branch_linkage_code(SH2 *sh2, struct block_desc *block, int tca
 static void *dr_get_pc_base(u32 pc, SH2 *sh2);
 static void sh2_smc_rm_blocks(u32 a, int len, int tcache_id, int free);
 
+static void REGPARM(2) *sh2_translate_block(SH2 *sh2, int tcache_id);
+
+// FBNeo: translation cache must be writable while generating code
 static void REGPARM(2) *sh2_translate(SH2 *sh2, int tcache_id)
+{
+  void *block;
+
+  drc_jit_write_begin();
+  block = sh2_translate_block(sh2, tcache_id);
+  drc_jit_write_end();
+  return block;
+}
+
+static void REGPARM(2) *sh2_translate_block(SH2 *sh2, int tcache_id)
 {
   // branch targets in current block
   static struct linkage branch_targets[MAX_LOCAL_TARGETS];
@@ -5306,6 +5370,7 @@ static void sh2_generate_utils(void)
   emith_sh2_rcall(arg0, arg1, arg2, arg3);
   EMITH_SJMP_START(DCOND_CS);
   emith_and_r_r_c(DCOND_CC, arg0, arg3);
+  emit_le_ptr16(DCOND_CC, arg0);
   emith_read16s_r_r_r_c(DCOND_CC, RET_REG, arg2, arg0);
   emith_ret_c(DCOND_CC);
   EMITH_SJMP_END(DCOND_CS);
@@ -5356,6 +5421,7 @@ static void sh2_generate_utils(void)
   emith_abijump_reg_c(DCOND_CS, arg2);
   EMITH_SJMP_END(DCOND_CC);
   emith_and_r_r_r(arg1, arg0, arg3);
+  emit_le_ptr16(-1, arg1);
   emith_read16s_r_r_r(arg1, arg2, arg1);
   emith_push_ret(arg1);
   emith_move_r_r_ptr(arg2, CONTEXT_REG);
@@ -5913,6 +5979,9 @@ void sh2_drc_flush_all(void)
   dr_flush_tcache(0);
   dr_flush_tcache(1);
   dr_flush_tcache(2);
+#if DRC_COUNT_MARKED_BLOCKS
+  Pico32xMem->marked_blocks = 0;
+#endif
   Pico32x.emu_flags &= ~P32XF_DRC_ROM_C;
 }
 
@@ -5972,9 +6041,11 @@ int sh2_drc_init(SH2 *sh2)
     rcache_init();
 
     tcache_ptr = tcache;
+    drc_jit_write_begin();
     sh2_generate_utils();
     host_instructions_updated(tcache, tcache_ptr, 1);
     emith_update_cache();
+    drc_jit_write_end();
 
     i = tcache_ptr - tcache;
     RING_INIT(&tcache_ring[0], tcache_ptr, tcache_sizes[0] - i);
@@ -6084,7 +6155,8 @@ static void *dr_get_pc_base(u32 pc, SH2 *sh2)
   void *ret;
   u32 mask = 0;
 
-  ret = p32x_sh2_get_mem_ptr(pc, &mask, sh2);
+  // FBNeo: instruction fetches may use a different map than data reads
+  ret = p32x_sh2_get_code_ptr(pc, &mask, sh2);
   if (ret == (void *)-1)
     return ret;
 

@@ -47,6 +47,10 @@ void Sh2SetVBR(unsigned int i);
 
 void Sh2BurnUntilInt(int);
 
+// non-zero if the SH2 recompiler is in use. It detects idle loops by itself
+// and doesn't track the pc, so pc based speedhacks don't apply.
+INT32 Sh2DrcActive();
+
 INT32 Sh2TotalCycles();
 void Sh2NewFrame();
 void Sh2BurnCycles(int cycles);

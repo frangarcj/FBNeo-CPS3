@@ -1328,11 +1328,14 @@ INT32 cps3Init()
 
 #ifdef SPEED_HACK
 		// install speedup read handler
-		Sh2MapHandler(5,			0x02000000 | (cps3_speedup_ram_address & 0x030000),
-							0x0200ffff | (cps3_speedup_ram_address & 0x030000), MAP_READ);
-		Sh2SetReadByteHandler (5, cps3RamReadByte);
-		Sh2SetReadWordHandler (5, cps3RamReadWord);
-		Sh2SetReadLongHandler (5, cps3RamReadLong);
+		// (the SH2 recompiler does its own idle loop detection)
+		if (!Sh2DrcActive()) {
+			Sh2MapHandler(5,			0x02000000 | (cps3_speedup_ram_address & 0x030000),
+								0x0200ffff | (cps3_speedup_ram_address & 0x030000), MAP_READ);
+			Sh2SetReadByteHandler (5, cps3RamReadByte);
+			Sh2SetReadWordHandler (5, cps3RamReadWord);
+			Sh2SetReadLongHandler (5, cps3RamReadLong);
+		}
 #endif
 
 	}

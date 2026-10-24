@@ -33,6 +33,29 @@
 #include "sh2_intf.h"
 #include <stddef.h>
 
+#ifdef DRC_SH2
+#define SH2_DRC_NO_SH2_TYPEDEF
+extern "C" {
+#include "drc/pico/pico_int.h"
+#include "drc/sh2/sh2.h"
+#define SH2 SH2_DRC
+#include "drc/sh2/compiler.h"
+#undef SH2
+}
+DRC_DECLARE_SR;
+
+static INT32 drc_initted;
+static INT32 drc_in_run;
+static void Sh2DrcInit();
+static void Sh2DrcExit();
+static void Sh2DrcFlush();
+static void Sh2DrcMapChanged(UINT32 nStart, UINT32 nEnd, INT32 nType);
+static void Sh2DrcIrqChanged();
+static void Sh2DrcEndRun();
+static void Sh2DrcWriteCheck(UINT32 a, UINT32 len);
+static INT32 Sh2DrcRun(INT32 cycles);
+#endif
+
 int has_sh2;
 INT32 cps3speedhack; // must be set _after_ Sh2Init();
 
@@ -280,6 +303,9 @@ int Sh2MapMemory(unsigned char* pMemory, unsigned int nStart, unsigned int nEnd,
 			}
 		}
 	}
+#ifdef DRC_SH2
+	Sh2DrcMapChanged(nStart, nEnd, nType);
+#endif
 	return 0;
 }
 
@@ -328,6 +354,9 @@ int Sh2MapHandler(uintptr_t nHandler, unsigned int nStart, unsigned int nEnd, in
 		}
 		
 	}
+#ifdef DRC_SH2
+	Sh2DrcMapChanged(nStart, nEnd, nType);
+#endif
 	return 0;
 }
 
@@ -473,6 +502,10 @@ void Sh2Exit()
 
 	has_sh2 = 0;
 
+#ifdef DRC_SH2
+	Sh2DrcExit();
+#endif
+
 	if (Sh2Ext) {
 		free(Sh2Ext);
 		Sh2Ext = NULL;
@@ -537,6 +570,14 @@ int Sh2Init(int nCount)
 		CpuCheatRegister(i, &Sh2Config);
 	}
 
+#ifdef DRC_SH2
+	// the recompiler supports a single cpu. FBNEO_SH2_DRC=0 selects the interpreter
+	const char *env = getenv("FBNEO_SH2_DRC");
+	if (nCount == 1 && !(env && env[0] == '0')) {
+		Sh2DrcInit();
+	}
+#endif
+
 	return 0;
 }
 
@@ -596,6 +637,10 @@ void Sh2Reset(unsigned int pc, unsigned r15)
 	change_pc(sh2->pc & AM);
 
 	sh2->internal_irq_level = -1;
+
+#ifdef DRC_SH2
+	Sh2DrcFlush();
+#endif
 }
 
 //----------------------------------------------------------------
@@ -2924,6 +2969,10 @@ static void sh2_recalc_irq(void)
 	sh2->internal_irq_level = irq;
 	sh2->internal_irq_vector = vector;
 	sh2->test_irq = 1;
+
+#ifdef DRC_SH2
+	Sh2DrcIrqChanged();
+#endif
 }
 
 static void sh2_timer_callback()
@@ -3002,6 +3051,9 @@ static void sh2_dmac_check(int dma)
 			
 			src &= AM;
 			dst &= AM;
+#ifdef DRC_SH2
+			UINT32 dst_start = dst;
+#endif
 
 			switch(size)
 			{
@@ -3079,6 +3131,15 @@ static void sh2_dmac_check(int dma)
 				}
 				break;
 			}
+
+#ifdef DRC_SH2
+			// invalidate translated code the transfer overwrote
+			if (drc_initted) {
+				if (dst < dst_start) Sh2DrcWriteCheck(dst, dst_start - dst);
+				else if (dst > dst_start) Sh2DrcWriteCheck(dst_start, dst - dst_start);
+				else Sh2DrcWriteCheck(dst, 16);
+			}
+#endif
 		}
 	}
 	else
@@ -3307,6 +3368,11 @@ int Sh2Run(int cycles)
 	if (!DebugCPU_SH2Initted) bprintf(PRINT_ERROR, _T("Sh2Run called without init\n"));
 #endif
 
+#ifdef DRC_SH2
+	if (drc_initted)
+		return Sh2DrcRun(cycles);
+#endif
+
 	sh2->sh2_icount = cycles;
 	sh2->sh2_cycles_to_run = cycles;
 	sh2->end_run = 0;
@@ -3414,13 +3480,22 @@ static void Sh2SetIRQLine_Internal(const int line, int state)
 		sh2->pending_irq |= 1 << line;
 		sh2->irq_line_hold[line] = hold;
 
-		if(sh2->delay)
-			sh2->test_irq = 1;
-		else
-			CHECK_PENDING_IRQ(/*"sh2_set_irq_line"*/);
+#ifdef DRC_SH2
+		if (!drc_initted) // the DRC takes it when it next tests for irqs
+#endif
+		{
+			if(sh2->delay)
+				sh2->test_irq = 1;
+			else
+				CHECK_PENDING_IRQ(/*"sh2_set_irq_line"*/);
+		}
 
 		pSh2Ext->suspend = 0;
 	}
+
+#ifdef DRC_SH2
+	Sh2DrcIrqChanged();
+#endif
 
 }
 
@@ -3449,6 +3524,11 @@ unsigned int Sh2GetPC(int)
 	if (!DebugCPU_SH2Initted) bprintf(PRINT_ERROR, _T("Sh2GetPC called without init\n"));
 #endif
 
+#ifdef DRC_SH2
+	// the translated code doesn't keep track of the pc
+	if (drc_in_run) return ~0;
+#endif
+
 	return (sh2->delay) ? (sh2->delay & AM) : (sh2->pc & AM);
 }
 
@@ -3468,6 +3548,19 @@ void Sh2BurnUntilInt(int)
 #endif
 
 	pSh2Ext->suspend = 1;
+
+#ifdef DRC_SH2
+	Sh2DrcEndRun();
+#endif
+}
+
+INT32 Sh2DrcActive()
+{
+#ifdef DRC_SH2
+	return drc_initted;
+#else
+	return 0;
+#endif
 }
 
 void Sh2StopRun()
@@ -3477,6 +3570,10 @@ void Sh2StopRun()
 #endif
 
 	sh2->end_run = 1;
+
+#ifdef DRC_SH2
+	Sh2DrcEndRun();
+#endif
 }
 
 INT32 Sh2TotalCycles()
@@ -3570,9 +3667,18 @@ int Sh2Scan(int nAction)
 				change_pc(sh2->pc & AM); // re-load the opbase
 			}
 #endif
+#ifdef DRC_SH2
+			if (nAction & ACB_WRITE) {
+				Sh2DrcFlush(); // ram contents changed
+			}
+#endif
 		}
 
 	}
 	
 	return 0;
 }
+
+#ifdef DRC_SH2
+#include "sh2_drc.inl"
+#endif

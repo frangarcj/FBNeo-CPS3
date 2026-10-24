@@ -9,3 +9,30 @@ INCLUDE_DIRS += $(CPS3_DIR)
 
 CFLAGS += -DSUBSET=\"$(SUBSET)\" -DSUPPORT_SPLIT_DRIVER -DBUILD_CPS3
 CXXFLAGS += -DSUBSET=\"$(SUBSET)\" -DSUPPORT_SPLIT_DRIVER -DBUILD_CPS3
+
+# SH2 recompiler (from PicoDrive), on hosts it has a code emitter for
+ifeq ($(USE_DRC_SH2),)
+	ifeq ($(platform), vita)
+		USE_DRC_SH2 = 1
+	else ifneq (,$(filter osx unix,$(platform)))
+		ifneq (,$(filter arm64 aarch64 x86_64 armv7%,$(shell uname -m)))
+			USE_DRC_SH2 = 1
+		endif
+	endif
+endif
+
+ifeq ($(USE_DRC_SH2), 1)
+	SH2_DRC_DIR := $(SH2_CPU_DIR)/drc
+	SOURCES_C += $(SH2_DRC_DIR)/sh2/compiler.c \
+		$(SH2_DRC_DIR)/drc/cmn.c
+	INCLUDE_DIRS += $(SH2_DRC_DIR)
+	CFLAGS += -DDRC_SH2
+	CXXFLAGS += -DDRC_SH2
+endif
+
+ifeq ($(USE_DRC_SH2)$(platform), 1vita)
+# the generated code is ARM, and handler addresses are stored without the
+# thumb bit, so everything it calls must be ARM code as well
+$(SH2_DRC_DIR)/sh2/compiler.o $(SH2_DRC_DIR)/drc/cmn.o: CFLAGS += -marm
+$(SH2_CPU_DIR)/sh2.o: CXXFLAGS += -marm
+endif
