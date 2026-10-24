@@ -42,6 +42,10 @@ static void cps3snd_render(INT16 **streams, INT32 samples)
 	INT8 * base = (INT8 *)chip->rombase;
 	cps3_voice *vptr = &chip->voice[0];
 
+	// default routing at full volume, the usual case: no floating point per sample
+	INT32 plain = chip->gain[BURN_SND_CPS3SND_ROUTE_1] == 1.00 && chip->gain[BURN_SND_CPS3SND_ROUTE_2] == 1.00 &&
+		chip->output_dir[BURN_SND_CPS3SND_ROUTE_1] == BURN_SND_ROUTE_LEFT && chip->output_dir[BURN_SND_CPS3SND_ROUTE_2] == BURN_SND_ROUTE_RIGHT;
+
 	for(INT32 i=0; i<CPS3_VOICES; i++, vptr++) {
 		if (chip->key & (1 << i)) {
 
@@ -76,6 +80,13 @@ static void cps3snd_render(INT16 **streams, INT32 samples)
 				// 8bit sample store with 16bit bigend ???
 				sample = base[(start + pos) ^ 1];
 				frac += step;
+
+				if (plain) {
+					// "left" volume register ends up on the right speaker and vice versa
+					mix[0][j] += (sample * vol_r) >> 8;
+					mix[1][j] += (sample * vol_l) >> 8;
+					continue;
+				}
 
 				INT32 nLeftSample = 0, nRightSample = 0;
 

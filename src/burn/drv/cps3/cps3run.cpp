@@ -1572,8 +1572,52 @@ static void cps3_draw_tilemapsprite_line(INT32 drawline, UINT32 * regs )
 	}
 }
 
+#ifdef CPS3_PROFILE
+// Average time spent per frame in the SH2, sound and video, logged every 600
+// frames. Build with CPS3_PROFILE=1.
+#ifdef VITA
+#include <psp2/kernel/processmgr.h>
+static inline UINT64 cps3_profile_us() { return sceKernelGetProcessTimeWide(); }
+#else
+#include <time.h>
+static inline UINT64 cps3_profile_us()
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (UINT64)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+#endif
+
+// sh2, sound, video: layers, final copy, SS layer
+static UINT64 cps3_profile_time[6], cps3_profile_frames;
+
+static void cps3_profile_add(INT32 what, UINT64 start)
+{
+	cps3_profile_time[what] += cps3_profile_us() - start;
+}
+
+static void cps3_profile_frame()
+{
+	if (++cps3_profile_frames < 600) return;
+	UINT64 *t = cps3_profile_time;
+	bprintf(PRINT_NORMAL, _T("CPS3 profile, us per frame: sh2 %d, sound %d, video %d (layers %d, copy %d, text %d)\n"),
+		(INT32)(t[0] / 600), (INT32)(t[1] / 600), (INT32)((t[3] + t[4] + t[5]) / 600),
+		(INT32)(t[3] / 600), (INT32)(t[4] / 600), (INT32)(t[5] / 600));
+	memset(cps3_profile_time, 0, sizeof(cps3_profile_time));
+	cps3_profile_frames = 0;
+}
+#define CPS3_PROFILE_START()		UINT64 profile_start = cps3_profile_us()
+#define CPS3_PROFILE_END(what)		cps3_profile_add(what, profile_start); profile_start = cps3_profile_us()
+#define CPS3_PROFILE_FRAME()		cps3_profile_frame()
+#else
+#define CPS3_PROFILE_START()
+#define CPS3_PROFILE_END(what)
+#define CPS3_PROFILE_FRAME()
+#endif
+
 INT32 DrvCps3Draw()
 {
+	CPS3_PROFILE_START();
 	UINT32 *crtc = RamVReg + 0x60 / 4;
 
 	BurnDrvGetVisibleSize(&cps3_gfx_width, &cps3_gfx_height);
@@ -1778,6 +1822,8 @@ INT32 DrvCps3Draw()
 		}
 	}
 	
+	CPS3_PROFILE_END(3);
+
 	if (fszx == 0x10000 && fszy == 0x10000 && (nBurnLayer & 1))
 	{
 		// no zoom: also clear the buffer for the next frame on the way
@@ -1810,6 +1856,8 @@ INT32 DrvCps3Draw()
 		}
 	}
 	
+	CPS3_PROFILE_END(4);
+
 	if (nBurnLayer & 2)
 	{
 		// SS layer, as in MAME. The vertical scroll only selects the page
@@ -1861,47 +1909,11 @@ INT32 DrvCps3Draw()
 			}
 		}
 	}
+	CPS3_PROFILE_END(5);
+
 	return 0;
 }
 
-#ifdef CPS3_PROFILE
-// Average time spent per frame in the SH2, sound and video, logged every 600
-// frames. Build with CPS3_PROFILE=1.
-#ifdef VITA
-#include <psp2/kernel/processmgr.h>
-static inline UINT64 cps3_profile_us() { return sceKernelGetProcessTimeWide(); }
-#else
-#include <time.h>
-static inline UINT64 cps3_profile_us()
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (UINT64)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-}
-#endif
-
-static UINT64 cps3_profile_time[3], cps3_profile_frames;
-
-static void cps3_profile_add(INT32 what, UINT64 start)
-{
-	cps3_profile_time[what] += cps3_profile_us() - start;
-}
-
-static void cps3_profile_frame()
-{
-	if (++cps3_profile_frames < 600) return;
-	bprintf(PRINT_NORMAL, _T("CPS3 profile, us per frame: sh2 %d, sound %d, video %d\n"),
-		(INT32)(cps3_profile_time[0] / 600), (INT32)(cps3_profile_time[1] / 600), (INT32)(cps3_profile_time[2] / 600));
-	cps3_profile_time[0] = cps3_profile_time[1] = cps3_profile_time[2] = cps3_profile_frames = 0;
-}
-#define CPS3_PROFILE_START()		UINT64 profile_start = cps3_profile_us()
-#define CPS3_PROFILE_END(what)		cps3_profile_add(what, profile_start); profile_start = cps3_profile_us()
-#define CPS3_PROFILE_FRAME()		cps3_profile_frame()
-#else
-#define CPS3_PROFILE_START()
-#define CPS3_PROFILE_END(what)
-#define CPS3_PROFILE_FRAME()
-#endif
 
 // run the SH2 to the given cycle of the frame in slices of nSlice cycles,
 // raising the DMA irq on time
@@ -2016,8 +2028,7 @@ INT32 cps3Frame()
 	cps3SndUpdate();
 	CPS3_PROFILE_END(1);
 
-	if (pBurnDraw) DrvCps3Draw();
-	CPS3_PROFILE_END(2);
+	if (pBurnDraw) DrvCps3Draw(); // profiled inside
 	CPS3_PROFILE_FRAME();
 
 	return 0;

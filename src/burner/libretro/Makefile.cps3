@@ -41,3 +41,7 @@ endif
 ifeq ($(CPS3_PROFILE), 1)
 	CXXFLAGS += -DCPS3_PROFILE
 endif
+
+# extra compiler flags, e.g. for experiments
+CFLAGS += $(CPS3_CFLAGS)
+CXXFLAGS += $(CPS3_CFLAGS)
