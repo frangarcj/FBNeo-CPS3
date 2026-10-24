@@ -3,7 +3,8 @@
 #
 # Every push builds it (download it from the run's artifacts). Run it by hand
 # (Actions, Run workflow) with "Publish a release" to also publish it, tagged
-# <RetroArch version>-cps3.<n>.
+# <RetroArch version>-cps3.<n>, or with "Release candidate" too as a
+# pre-release tagged <RetroArch version>-cps3.<n>-rc<m> (n the next release).
 
 name: PS Vita
 
@@ -17,6 +18,10 @@ on:
         required: false
       release:
         description: Publish a release
+        type: boolean
+        default: false
+      candidate:
+        description: Release candidate (pre-release)
         type: boolean
         default: false
 
@@ -93,18 +98,27 @@ jobs:
       env:
         GH_TOKEN: ${{ github.token }}
         RA_VERSION: ${{ needs.build.outputs.retroarch }}
+        CANDIDATE: ${{ inputs.candidate }}
       run: |
         prefix="$RA_VERSION-cps3."
-        n=$(gh release list --limit 1000 --json tagName --jq '.[].tagName' \
-          | sed -n "s/^$prefix\([0-9]*\)$/\1/p" | sort -n | tail -1)
+        tags=$(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+        n=$(echo "$tags" | sed -n "s/^$prefix\([0-9]*\)$/\1/p" | sort -n | tail -1)
         tag="$prefix$(( ${n:-0} + 1 ))"
+        flags=""
+        intro="FinalBurn Neo CPS3 for the PS Vita, built with RetroArch $RA_VERSION."
+        if [ "$CANDIDATE" = "true" ]; then
+          m=$(echo "$tags" | sed -n "s/^$tag-rc\([0-9]*\)$/\1/p" | sort -n | tail -1)
+          tag="$tag-rc$(( ${m:-0} + 1 ))"
+          flags="--prerelease"
+          intro="Release candidate of $intro Please test it before the release."
+        fi
         shots="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/dist/vita/screenshots"
         cat > notes.md <<EOF
-        FinalBurn Neo CPS3 for the PS Vita, built with RetroArch $RA_VERSION.
+        $intro
 
         Copy the \`app\` folder of the zip to the root of \`ux0:\` (see README.txt in the zip).
 
         ![sfiii3 wide]($shots/sfiii3-wide-1.png) ![sfiii3 wide]($shots/sfiii3-wide-3.png)
         ![jojoba]($shots/jojoba.png)
         EOF
-        gh release create "$tag" fbneo_cps3_vita.zip --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
+        gh release create "$tag" fbneo_cps3_vita.zip $flags --target "$GITHUB_SHA" --title "$tag" --notes-file notes.md
